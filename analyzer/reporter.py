@@ -1,64 +1,14 @@
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 from rich.text import Text
+from rich.table import Table
 
 console = Console()
 
 
-def get_resolution(leak):
-    reason = leak["reason"].lower()
-
-    if "returns" in reason:
-        return (
-            f"Close '{leak['variable']}' before the function returns, "
-            "or use a 'with open(...)' block."
-        )
-
-    if "raises" in reason or "exception" in reason:
-        return (
-            f"Make sure '{leak['variable']}' is closed even when an "
-            "exception occurs. Use 'finally' or preferably 'with open(...)'."
-        )
-
-    return (
-        f"Close '{leak['variable']}' after you finish using it. "
-        "Using 'with open(...)' is recommended."
-    )
-
-
-def get_suggested_fix(leak):
-    """
-    Generate a suggested fix.
-    """
-
-    variable = leak["variable"]
-    reason = leak["reason"].lower()
-
-    # Case 1: Resource is leaked because of return
-    if "returns" in reason:
-        return (
-            f"# Close the resource before returning\n"
-            f"{variable}.close()\n"
-            f"return data"
-        )
-
-    # Case 2: Resource remains open when exception occurs
-    if "raises" in reason or "exception" in reason:
-        return (
-            f"try:\n"
-            f"    # use {variable} here\n"
-            f"    data = {variable}.read()\n"
-            f"finally:\n"
-            f"    {variable}.close()"
-        )
-
-    # Default case
-    return (
-        f"# Close the resource after use\n"
-        f"{variable}.close()"
-    )
-
+# ============================================================
+# HEADER
+# ============================================================
 
 def print_header():
     console.print()
@@ -69,30 +19,108 @@ def print_header():
             "[dim]Python Resource Security Analyzer[/dim]",
             border_style="cyan",
             expand=False,
+            padding=(0, 1),
         )
     )
 
-    console.print()
 
+# ============================================================
+# RESOLUTION
+# ============================================================
+
+def get_resolution(leak):
+    fix = leak.get("fix", {})
+
+    if fix.get("summary"):
+        return fix["summary"]
+
+    variable = leak["variable"]
+
+    reason = leak.get("reason", "").lower()
+
+    if "return" in reason:
+        return (
+            f"Close '{variable}' before returning, "
+            f"or use a 'with open(...)' block."
+        )
+
+    if "exception" in reason:
+        return (
+            f"Make sure '{variable}' is closed even when "
+            f"an exception occurs. Use 'finally' or 'with'."
+        )
+
+    return (
+        f"Close '{variable}' after its final use, "
+        f"or use a 'with open(...)' block."
+    )
+
+
+# ============================================================
+# SUGGESTED FIX
+# ============================================================
+
+def get_suggested_fix(leak):
+    fix = leak.get("fix", {})
+
+    if fix.get("example"):
+        return fix["example"]
+
+    variable = leak["variable"]
+
+    return f"{variable}.close()"
+
+
+# ============================================================
+# EXECUTION PATH
+# ============================================================
+
+def print_execution_path(leak):
+    path = leak.get("path", [])
+
+    if not path:
+        console.print(
+            "[dim]No execution path information available.[/dim]"
+        )
+        return
+
+    for index, step in enumerate(path):
+
+        if index == 0:
+            console.print(f"  [white]{step}[/white]")
+        else:
+            console.print(
+                f"  [cyan]↓[/cyan] [white]{step}[/white]"
+            )
+
+
+# ============================================================
+# MAIN REPORT
+# ============================================================
 
 def print_report(filename, leaks):
+
     print_header()
 
-# NO LEAKS
+    # ========================================================
+    # NO LEAKS
+    # ========================================================
 
     if not leaks:
+
         console.print(
             Panel(
                 "[bold green]✅ NO RESOURCE LEAKS DETECTED[/bold green]\n\n"
                 "[green]All analyzed execution paths appear to "
                 "release their tracked resources.[/green]",
-                title="SECURITY RESULT",
+                title="[bold green]SECURITY RESULT[/bold green]",
                 border_style="green",
+                padding=(0, 1),
             )
         )
 
         console.print(
-            f"\n📄 [bold]FILE:[/bold] {filename}"
+            f"📄 [bold]FILE:[/bold] {filename}"
         )
 
         console.print(
@@ -100,14 +128,36 @@ def print_report(filename, leaks):
         )
 
         console.print()
-
         return
 
-    # -------------------------
-    # SUMMARY
-    # -------------------------
 
-    summary = Table.grid(padding=(0, 2))
+    # ========================================================
+    # SUMMARY
+    # ========================================================
+
+    high = sum(
+        1 for leak in leaks
+        if leak.get("severity") == "HIGH"
+    )
+
+    medium = sum(
+        1 for leak in leaks
+        if leak.get("severity") == "MEDIUM"
+    )
+
+    definite = sum(
+        1 for leak in leaks
+        if leak.get("certainty") == "DEFINITE"
+    )
+
+    possible = sum(
+        1 for leak in leaks
+        if leak.get("certainty") == "POSSIBLE"
+    )
+
+    summary = Table.grid(
+        padding=(0, 2)
+    )
 
     summary.add_row(
         "📄 FILE",
@@ -119,36 +169,104 @@ def print_report(filename, leaks):
         f"[bold red]{len(leaks)} issue(s) found[/bold red]"
     )
 
+    summary.add_row(
+        "🔴 HIGH",
+        str(high)
+    )
+
+    summary.add_row(
+        "🟡 MEDIUM",
+        str(medium)
+    )
+
+    summary.add_row(
+        "✓ DEFINITE",
+        str(definite)
+    )
+
+    summary.add_row(
+        "? POSSIBLE",
+        str(possible)
+    )
+
+    console.print()
+
     console.print(
         Panel(
             summary,
             title="[bold]SCAN SUMMARY[/bold]",
             border_style="yellow",
+            padding=(0, 1),
         )
     )
 
-    console.print()
 
-# FINDINGS
+    # ========================================================
+    # FINDINGS
+    # ========================================================
 
     for index, leak in enumerate(leaks, start=1):
+
+        variable = leak["variable"]
+        resource_type = leak["resource_type"]
+
+        open_line = leak["open_line"]
+        leak_line = leak["leak_line"]
+
+        severity = leak.get(
+            "severity",
+            "UNKNOWN"
+        )
+
+        certainty = leak.get(
+            "certainty",
+            "UNKNOWN"
+        )
+
+        reason = leak.get(
+            "reason",
+            "Resource leak detected."
+        )
 
         resolution = get_resolution(leak)
         suggested_fix = get_suggested_fix(leak)
 
+
+        # ----------------------------------------------------
+        # FINDING PANEL
+        # ----------------------------------------------------
+
         finding = Text()
 
         finding.append(
-            f"📍 LINE: {leak['open_line']}\n",
+            f"📍 OPENED: line {open_line}\n",
             style="bold"
         )
 
         finding.append(
-            f"🔧 RESOURCE: {leak['resource_type']}\n"
+            f"📍 EXIT: line {leak_line}\n"
         )
 
         finding.append(
-            f"📦 VARIABLE: {leak['variable']}\n\n"
+            f"🔧 RESOURCE: {resource_type}\n"
+        )
+
+        finding.append(
+            f"📦 VARIABLE: {variable}\n"
+        )
+
+        finding.append(
+            f"🚨 SEVERITY: {severity}\n",
+            style=(
+                "bold red"
+                if severity == "HIGH"
+                else "bold yellow"
+            )
+        )
+
+        finding.append(
+            f"🔎 CERTAINTY: {certainty}\n\n",
+            style="bold"
         )
 
         finding.append(
@@ -157,48 +275,156 @@ def print_report(filename, leaks):
         )
 
         finding.append(
-            f"{leak['reason']}\n\n"
+            f"{reason}"
         )
 
-        finding.append(
-            "🛠️  RESOLVE\n",
-            style="bold green"
-        )
 
-        finding.append(
-            f"{resolution}\n\n"
-        )
-
-        finding.append(
-            "💡 SUGGESTED FIX\n",
-            style="bold cyan"
-        )
-
-        finding.append(
-            suggested_fix
-        )
+        console.print()
 
         console.print(
             Panel(
                 finding,
                 title=(
-                    f"[bold red]"
-                    f"🔴 FINDING #{index} · RESOURCE LEAK"
-                    f"[/bold red]"
+                    f"[bold red]🔴 FINDING #{index} "
+                    f"· RESOURCE LEAK[/bold red]"
                 ),
                 border_style="red",
+                padding=(0, 1),
+                expand=True,
             )
         )
 
-        console.print()
 
-# BUILD FAILED
+        # ----------------------------------------------------
+        # EXECUTION PATH
+        # ----------------------------------------------------
+
+        path_text = Text()
+
+        path = leak.get("path", [])
+
+        if path:
+
+            for i, step in enumerate(path):
+
+                if i > 0:
+                    path_text.append(
+                        "\n      ↓\n",
+                        style="cyan"
+                    )
+
+                path_text.append(
+                    f"  {step}"
+                )
+
+        else:
+
+            path_text.append(
+                "  Execution path not available.",
+                style="dim"
+            )
+
+
+        console.print(
+            Panel(
+                path_text,
+                title="[bold cyan]🧭 EXECUTION PATH[/bold cyan]",
+                border_style="cyan",
+                padding=(0, 1),
+                expand=True,
+            )
+        )
+
+
+        # ----------------------------------------------------
+        # RESOLUTION
+        # ----------------------------------------------------
+
+        console.print(
+            Panel(
+                resolution,
+                title="[bold green]🛠 RESOLUTION[/bold green]",
+                border_style="green",
+                padding=(0, 1),
+                expand=True,
+            )
+        )
+
+
+        # ----------------------------------------------------
+        # SUGGESTED FIX
+        # ----------------------------------------------------
+
+        fix = leak.get("fix", {})
+
+        fix_text = Text()
+
+        if fix.get("strategy"):
+            fix_text.append(
+                f"Strategy: {fix['strategy']}\n"
+            )
+
+        if fix.get("confidence"):
+            fix_text.append(
+                f"Confidence: {fix['confidence']}\n\n",
+                style="bold"
+            )
+
+        fix_text.append(
+            "Recommended code:\n",
+            style="bold cyan"
+        )
+
+        fix_text.append(
+            suggested_fix
+        )
+
+        if fix.get("why"):
+
+            fix_text.append(
+                "\n\nWhy this fix:\n",
+                style="bold green"
+            )
+
+            fix_text.append(
+                fix["why"]
+            )
+
+        if fix.get("risk"):
+
+            fix_text.append(
+                "\n\nImportant:\n",
+                style="bold yellow"
+            )
+
+            fix_text.append(
+                fix["risk"]
+            )
+
+
+        console.print(
+            Panel(
+                fix_text,
+                title="[bold cyan]💡 SUGGESTED FIX[/bold cyan]",
+                border_style="cyan",
+                padding=(0, 1),
+                expand=True,
+            )
+        )
+
+
+    # ========================================================
+    # BUILD FAILED
+    # ========================================================
+
+    console.print()
 
     console.print(
         Panel(
-            f"[bold red]⚠️  BUILD FAILED[/bold red]\n\n"
+            "[bold red]⚠️ BUILD FAILED[/bold red]\n\n"
             f"{len(leaks)} resource leak(s) require attention.",
             border_style="red",
+            padding=(0, 1),
             expand=False,
         )
     )
