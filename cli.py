@@ -1,74 +1,149 @@
 import argparse
-import os
+import json
+from pathlib import Path
 
 from analyzer.parser import parse_file
 from analyzer.flow import FlowAnalyzer
 from analyzer.reporter import print_report
 
-from agent.events import EventReporter
+
+def find_python_files(path):
+    path = Path(path)
+
+    if path.is_file():
+        return [path]
+
+    return [
+        file
+        for file in path.rglob("*.py")
+        if ".git" not in file.parts
+        and "__pycache__" not in file.parts
+    ]
 
 
-BACKEND_URL = os.getenv(
-    "LEAKGUARD_BACKEND_URL",
-    "http://127.0.0.1:8000"
-)
+def analyze_file(filename):
+    try:
+        tree = parse_file(filename)
 
-AGENT_ID = os.getenv(
-    "LEAKGUARD_AGENT_ID",
-    "agent-test-001"
-)
+    except SyntaxError as error:
+        return {
+            "file": str(filename),
+            "status": "ERROR",
+            "error": f"Line {error.lineno}: {error.msg}",
+            "leaks": []
+        }
 
+    except Exception as error:
+        return {
+            "file": str(filename),
+            "status": "ERROR",
+            "error": str(error),
+            "leaks": []
+        }
 
-def report_scan_result(filename, leaks):
-    reporter = EventReporter(
-        backend_url=BACKEND_URL,
-        agent_id=AGENT_ID
-    )
+    analyzer = FlowAnalyzer()
+    leaks = analyzer.analyze(tree)
 
-    reporter.send_scan_result(
-        filename=filename,
-        leaks=leaks
-    )
+    return {
+        "file": str(filename),
+        "status": "FAILED" if leaks else "PASSED",
+        "leaks": leaks
+    }
 
 
 def main():
+
     parser = argparse.ArgumentParser(
-        description="LeakGuard Python Resource Leak Analyzer"
+        description="LeakGuard Python Resource Security Analyzer"
     )
 
     parser.add_argument(
-        "file",
-        help="Python file to analyze"
+        "path",
+        help="Python file or directory to analyze"
+    )
+
+    parser.add_argument(
+        "--format",
+        choices=["rich", "json"],
+        default="rich",
+        help="Output format"
     )
 
     args = parser.parse_args()
 
-    try:
-        tree = parse_file(args.file)
+    files = find_python_files(args.path)
 
-    except FileNotFoundError:
-        print(f"❌ File not found: {args.file}")
-        return 1
+    if not files:
+        print(f"No Python files found in: {args.path}")
+        return 0
 
-    except SyntaxError as error:
-        print("❌ Python syntax error")
-        print(f"Line {error.lineno}: {error.msg}")
-        return 1
+    results = []
 
-    analyzer = FlowAnalyzer()
+    for filename in files:
+        result = analyze_file(filename)
+        results.append(result)
 
-    leaks = analyzer.analyze(tree)
-
-    print_report(args.file, leaks)
-
-    # Report the scan to the monitoring backend.
-    # Failure to report must never break LeakGuard itself.
-    report_scan_result(
-        filename=args.file,
-        leaks=leaks
+    total_leaks = sum(
+        len(result["leaks"])
+        for result in results
     )
 
-    if leaks:
+    errors = [
+        result
+        for result in results
+        if result["status"] == "ERROR"
+    ]
+
+    # JSON OUTPUT
+    if args.format == "json":
+
+        output = {
+            "tool": "LeakGuard",
+            "status": (
+                "FAILED"
+                if total_leaks or errors
+                else "PASSED"
+            ),
+            "files_scanned": len(files),
+            "total_leaks": total_leaks,
+            "errors": len(errors),
+            "results": results
+        }
+
+        print(
+            json.dumps(
+                output,
+                indent=2,
+                default=str
+            )
+        )
+
+    # RICH OUTPUT
+    else:
+
+        for result in results:
+
+            if result["status"] == "ERROR":
+
+                print(f"❌ {result['file']}")
+                print(f"   {result['error']}")
+
+                continue
+
+            print_report(
+                result["file"],
+                result["leaks"]
+            )
+
+        print()
+        print("=" * 60)
+        print(f"Files scanned : {len(files)}")
+        print(f"Leaks found   : {total_leaks}")
+        print(f"Errors        : {len(errors)}")
+        print("=" * 60)
+
+    # Exit code
+    if total_leaks or errors:
         return 1
 
     return 0
