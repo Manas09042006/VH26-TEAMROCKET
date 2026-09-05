@@ -9,7 +9,7 @@ class HeartbeatAgent:
         backend_url: str,
         agent_id: str,
         machine_name: str,
-        interval: int = 5
+        interval: int = 240
     ):
         self.client = BackendClient(backend_url)
         self.agent_id = agent_id

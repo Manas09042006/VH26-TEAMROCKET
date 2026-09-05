@@ -1,150 +1,232 @@
-import customtkinter as ctk
+import json
 from datetime import datetime
 
+import customtkinter as ctk
+import httpx
+
+from admin.websocket_client import AdminWebSocketClient
+
+
+# ============================================================
+# THEME
+# ============================================================
+
+BG_COLOR = "#080B12"
+SIDEBAR_COLOR = "#0D111A"
+CARD_COLOR = "#121824"
+CARD_HOVER = "#182131"
+
+ACCENT = "#00C2FF"
+ACCENT_DARK = "#087EA4"
+
+TEXT_PRIMARY = "#F4F7FB"
+TEXT_SECONDARY = "#8D99AA"
+TEXT_MUTED = "#5F6B7A"
+
+SUCCESS = "#27D17F"
+WARNING = "#FFB020"
+DANGER = "#FF4D67"
+PURPLE = "#9B7CFF"
+
+BORDER = "#202938"
+
+
+# ============================================================
+# DASHBOARD WINDOW
+# ============================================================
 
 class DashboardWindow:
 
-    def __init__(self, root, username):
-        self.root = root
+    def __init__(self, parent, username):
+
+        self.parent = parent
         self.username = username
-        self.sidebar_open = True
-        self.dark_mode = True
+
+        # Backend
+        self.backend_url = "http://127.0.0.1:8000"
+
+        # Current page
         self.current_page = "Dashboard"
 
-        self.setup_theme()
-        self.setup_window()
-        self.build_interface()
+        # Local data
+        self.employee_status = {}
+        self.activity_events = []
+        self.security_events = []
 
-        self.root.bind("<F11>", self.toggle_fullscreen)
-        self.root.bind("<Escape>", self.exit_fullscreen)
+        # UI containers
+        self.pages = {}
+        self.nav_buttons = {}
 
-        self.update_clock()
-        self.show_dashboard()
+        # ----------------------------------------------------
+        # WINDOW
+        # ----------------------------------------------------
 
-    # =========================================================
-    # THEME
-    # =========================================================
-
-    def setup_theme(self):
-
-        if self.dark_mode:
-            self.colors = {
-                "bg": "#080C14",
-                "sidebar": "#0B111C",
-                "card": "#111927",
-                "card_hover": "#172235",
-                "border": "#1D2A3A",
-
-                "primary": "#4F8CFF",
-                "primary_hover": "#6B9FFF",
-
-                "success": "#32D583",
-                "warning": "#FFB547",
-                "danger": "#FF5C70",
-                "info": "#5EC8FF",
-
-                "text": "#F4F7FB",
-                "muted": "#8C9AAF",
-                "dim": "#596679",
-
-                "input": "#0E1622",
-            }
-
-        else:
-            self.colors = {
-                "bg": "#F3F6FA",
-                "sidebar": "#FFFFFF",
-                "card": "#FFFFFF",
-                "card_hover": "#F0F4FA",
-                "border": "#DCE3EC",
-
-                "primary": "#2864D7",
-                "primary_hover": "#3E78E5",
-
-                "success": "#159F63",
-                "warning": "#D98A00",
-                "danger": "#D9364F",
-                "info": "#168DC4",
-
-                "text": "#172033",
-                "muted": "#68758A",
-                "dim": "#8E9AAC",
-
-                "input": "#F0F3F7",
-            }
-
-        ctk.set_appearance_mode("dark" if self.dark_mode else "light")
-
-    # =========================================================
-    # WINDOW
-    # =========================================================
-
-    def setup_window(self):
-
-        self.root.title("LeakGuard | Security Administration")
-
-        # Full screen
-        self.root.attributes("-fullscreen", True)
-
-        self.root.configure(
-            fg_color=self.colors["bg"]
+        self.parent.title(
+            "LeakGuard | Security Administration"
         )
 
-        self.root.minsize(1000, 650)
-
-    def toggle_fullscreen(self, event=None):
-
-        current = self.root.attributes("-fullscreen")
-
-        self.root.attributes(
-            "-fullscreen",
-            not current
+        self.parent.geometry(
+            "1280x760"
         )
 
-    def exit_fullscreen(self, event=None):
-
-        self.root.attributes(
-            "-fullscreen",
-            False
+        self.parent.minsize(
+            900,
+            600
         )
 
-    # =========================================================
-    # MAIN INTERFACE
-    # =========================================================
+        self.parent.configure(
+            fg_color=BG_COLOR
+        )
 
-    def build_interface(self):
+        self.parent.protocol(
+            "WM_DELETE_WINDOW",
+            self.close_dashboard
+        )
 
-        self.root.grid_columnconfigure(
+        # ----------------------------------------------------
+        # ROOT GRID
+        # ----------------------------------------------------
+
+        self.parent.grid_rowconfigure(
+            0,
+            weight=1
+        )
+
+        self.parent.grid_columnconfigure(
             0,
             weight=0
         )
 
-        self.root.grid_columnconfigure(
+        self.parent.grid_columnconfigure(
             1,
             weight=1
         )
 
-        self.root.grid_rowconfigure(
+        # ----------------------------------------------------
+        # SIDEBAR
+        # ----------------------------------------------------
+
+        self.create_sidebar()
+
+        # ----------------------------------------------------
+        # MAIN CONTAINER
+        # ----------------------------------------------------
+
+        self.main_container = ctk.CTkFrame(
+            self.parent,
+            fg_color=BG_COLOR,
+            corner_radius=0
+        )
+
+        self.main_container.grid(
+            row=0,
+            column=1,
+            sticky="nsew"
+        )
+
+        self.main_container.grid_rowconfigure(
+            1,
+            weight=1
+        )
+
+        self.main_container.grid_columnconfigure(
             0,
             weight=1
         )
 
-        self.build_sidebar()
-        self.build_main_area()
+        # ----------------------------------------------------
+        # TOPBAR
+        # ----------------------------------------------------
 
-    # =========================================================
+        self.create_topbar()
+
+        # ----------------------------------------------------
+        # CONTENT CONTAINER
+        # ----------------------------------------------------
+
+        self.content_container = ctk.CTkFrame(
+            self.main_container,
+            fg_color=BG_COLOR,
+            corner_radius=0
+        )
+
+        self.content_container.grid(
+            row=1,
+            column=0,
+            sticky="nsew",
+            padx=20,
+            pady=(0, 20)
+        )
+
+        self.content_container.grid_rowconfigure(
+            0,
+            weight=1
+        )
+
+        self.content_container.grid_columnconfigure(
+            0,
+            weight=1
+        )
+
+        # ----------------------------------------------------
+        # CREATE ALL PAGES
+        # ----------------------------------------------------
+
+        self.create_dashboard_page()
+        self.create_employees_page()
+        self.create_logs_page()
+        self.create_security_page()
+        self.create_reports_page()
+        self.create_settings_page()
+
+        # ----------------------------------------------------
+        # SHOW DASHBOARD
+        # ----------------------------------------------------
+
+        self.show_page(
+            "Dashboard"
+        )
+
+        # ----------------------------------------------------
+        # WEBSOCKET
+        # ----------------------------------------------------
+
+        self.websocket_client = AdminWebSocketClient(
+            self.handle_websocket_message
+        )
+
+        self.websocket_client.start()
+
+        # ----------------------------------------------------
+        # LOAD EXISTING BACKEND DATA
+        # ----------------------------------------------------
+
+        self.load_employees()
+        self.load_logs()
+
+        # ----------------------------------------------------
+        # PERIODIC BACKEND REFRESH
+        # ----------------------------------------------------
+
+        self.refresh_backend_data()
+
+        # ----------------------------------------------------
+        # CLOCK
+        # ----------------------------------------------------
+
+        self.update_clock()
+
+    # ========================================================
     # SIDEBAR
-    # =========================================================
+    # ========================================================
 
-    def build_sidebar(self):
+    def create_sidebar(self):
 
         self.sidebar = ctk.CTkFrame(
-            self.root,
-            width=250,
-            corner_radius=0,
-            fg_color=self.colors["sidebar"],
-            border_width=1,
-            border_color=self.colors["border"]
+            self.parent,
+            width=230,
+            fg_color=SIDEBAR_COLOR,
+            corner_radius=0
         )
 
         self.sidebar.grid(
@@ -153,16 +235,13 @@ class DashboardWindow:
             sticky="nsew"
         )
 
-        self.sidebar.grid_propagate(False)
-
-        self.sidebar.grid_rowconfigure(
-            10,
-            weight=1
+        self.sidebar.grid_propagate(
+            False
         )
 
-        # -------------------------
+        # ----------------------------------------------------
         # LOGO
-        # -------------------------
+        # ----------------------------------------------------
 
         logo_frame = ctk.CTkFrame(
             self.sidebar,
@@ -172,1543 +251,2115 @@ class DashboardWindow:
         logo_frame.pack(
             fill="x",
             padx=20,
-            pady=(24, 20)
-        )
-
-        logo_icon = ctk.CTkLabel(
-            logo_frame,
-            text="◈",
-            font=ctk.CTkFont(
-                size=30,
-                weight="bold"
-            ),
-            text_color=self.colors["primary"]
-        )
-
-        logo_icon.pack(
-            side="left"
-        )
-
-        logo_text = ctk.CTkFrame(
-            logo_frame,
-            fg_color="transparent"
-        )
-
-        logo_text.pack(
-            side="left",
-            padx=10
+            pady=(25, 30)
         )
 
         ctk.CTkLabel(
-            logo_text,
+            logo_frame,
             text="LEAKGUARD",
             font=ctk.CTkFont(
-                size=18,
+                size=22,
                 weight="bold"
             ),
-            text_color=self.colors["text"]
-        ).pack(anchor="w")
+            text_color=TEXT_PRIMARY
+        ).pack(
+            anchor="w"
+        )
 
         ctk.CTkLabel(
-            logo_text,
-            text="SECURITY CONSOLE",
+            logo_frame,
+            text="SECURITY ADMINISTRATION",
             font=ctk.CTkFont(
                 size=9,
                 weight="bold"
             ),
-            text_color=self.colors["muted"]
-        ).pack(anchor="w")
-
-        # -------------------------
-        # SYSTEM OWNER
-        # -------------------------
-
-        profile = ctk.CTkFrame(
-            self.sidebar,
-            fg_color=self.colors["card"],
-            corner_radius=12,
-            border_width=1,
-            border_color=self.colors["border"]
-        )
-
-        profile.pack(
-            fill="x",
-            padx=15,
-            pady=(0, 20)
-        )
-
-        ctk.CTkLabel(
-            profile,
-            text="SYSTEM OWNER",
-            font=ctk.CTkFont(
-                size=9,
-                weight="bold"
-            ),
-            text_color=self.colors["muted"]
+            text_color=ACCENT
         ).pack(
             anchor="w",
-            padx=14,
-            pady=(12, 2)
+            pady=(3, 0)
         )
 
-        ctk.CTkLabel(
-            profile,
-            text=self.username.upper(),
-            font=ctk.CTkFont(
-                size=14,
-                weight="bold"
-            ),
-            text_color=self.colors["text"]
-        ).pack(
-            anchor="w",
-            padx=14
-        )
-
-        ctk.CTkLabel(
-            profile,
-            text="●  Administrator",
-            font=ctk.CTkFont(size=10),
-            text_color=self.colors["success"]
-        ).pack(
-            anchor="w",
-            padx=14,
-            pady=(2, 12)
-        )
-
-        # -------------------------
+        # ----------------------------------------------------
         # NAVIGATION
-        # -------------------------
+        # ----------------------------------------------------
 
-        ctk.CTkLabel(
-            self.sidebar,
-            text="CONTROL CENTER",
-            font=ctk.CTkFont(
-                size=9,
-                weight="bold"
-            ),
-            text_color=self.colors["dim"]
-        ).pack(
-            anchor="w",
-            padx=20,
-            pady=(0, 8)
-        )
-
-        self.nav_buttons = {}
-
-        navigation = [
+        nav_items = [
             ("Dashboard", "⌂"),
-            ("Employees", "♙"),
+            ("Employees", "◉"),
             ("Activity Logs", "≡"),
             ("Security Events", "⚠"),
             ("Reports", "▤"),
             ("Settings", "⚙"),
         ]
 
-        for name, icon in navigation:
-            self.create_nav_button(
-                name,
-                icon
+        for name, icon in nav_items:
+
+            button = ctk.CTkButton(
+                self.sidebar,
+                text=f"  {icon}    {name}",
+                height=45,
+                anchor="w",
+                corner_radius=8,
+                fg_color="transparent",
+                hover_color=CARD_HOVER,
+                text_color=TEXT_SECONDARY,
+                font=ctk.CTkFont(
+                    size=13,
+                    weight="bold"
+                ),
+                command=lambda n=name: self.show_page(n)
             )
 
-        # -------------------------
-        # BOTTOM
-        # -------------------------
+            button.pack(
+                fill="x",
+                padx=12,
+                pady=3
+            )
 
-        bottom = ctk.CTkFrame(
+            self.nav_buttons[name] = button
+
+        # ----------------------------------------------------
+        # SYSTEM STATUS
+        # ----------------------------------------------------
+
+        status_frame = ctk.CTkFrame(
             self.sidebar,
-            fg_color="transparent"
+            fg_color=CARD_COLOR,
+            corner_radius=10
         )
 
-        bottom.pack(
+        status_frame.pack(
             side="bottom",
             fill="x",
             padx=15,
-            pady=15
+            pady=18
         )
 
-        ctk.CTkButton(
-            bottom,
-            text="⇥   LOGOUT",
-            height=42,
-            corner_radius=10,
-            fg_color="transparent",
-            hover_color=self.colors["card_hover"],
-            text_color=self.colors["danger"],
+        ctk.CTkLabel(
+            status_frame,
+            text="SYSTEM STATUS",
             font=ctk.CTkFont(
-                size=12,
+                size=9,
                 weight="bold"
             ),
-            command=self.logout
-        ).pack(fill="x")
-
-    # =========================================================
-    # NAV BUTTON
-    # =========================================================
-
-    def create_nav_button(self, name, icon):
-
-        button = ctk.CTkButton(
-            self.sidebar,
-            text=f"   {icon}     {name}",
-            height=45,
-            corner_radius=10,
+            text_color=TEXT_MUTED
+        ).pack(
             anchor="w",
-            fg_color="transparent",
-            hover_color=self.colors["card_hover"],
-            text_color=self.colors["muted"],
-            font=ctk.CTkFont(
-                size=12,
-                weight="bold"
-            ),
-            command=lambda: self.navigate(name)
+            padx=12,
+            pady=(10, 2)
         )
 
-        button.pack(
+        status_row = ctk.CTkFrame(
+            status_frame,
+            fg_color="transparent"
+        )
+
+        status_row.pack(
             fill="x",
             padx=12,
-            pady=3
+            pady=(0, 10)
         )
 
-        self.nav_buttons[name] = button
+        self.system_dot = ctk.CTkLabel(
+            status_row,
+            text="●",
+            font=ctk.CTkFont(
+                size=13
+            ),
+            text_color=SUCCESS
+        )
 
-    # =========================================================
-    # MAIN AREA
-    # =========================================================
+        self.system_dot.pack(
+            side="left"
+        )
 
-    def build_main_area(self):
+        self.system_status = ctk.CTkLabel(
+            status_row,
+            text="Backend Connected",
+            font=ctk.CTkFont(
+                size=11
+            ),
+            text_color=TEXT_PRIMARY
+        )
 
-        self.main = ctk.CTkFrame(
-            self.root,
-            fg_color=self.colors["bg"],
+        self.system_status.pack(
+            side="left",
+            padx=6
+        )
+
+    # ========================================================
+    # TOPBAR
+    # ========================================================
+
+    def create_topbar(self):
+
+        topbar = ctk.CTkFrame(
+            self.main_container,
+            height=70,
+            fg_color=BG_COLOR,
             corner_radius=0
         )
 
-        self.main.grid(
+        topbar.grid(
             row=0,
-            column=1,
-            sticky="nsew"
+            column=0,
+            sticky="ew",
+            padx=20
         )
 
-        self.main.grid_rowconfigure(
-            1,
-            weight=1
-        )
-
-        self.main.grid_columnconfigure(
+        topbar.grid_columnconfigure(
             0,
             weight=1
         )
 
-        self.build_topbar()
-
-        self.content = ctk.CTkScrollableFrame(
-            self.main,
-            fg_color="transparent",
-            corner_radius=0
-        )
-
-        self.content.grid(
-            row=1,
-            column=0,
-            sticky="nsew",
-            padx=30,
-            pady=(10, 25)
-        )
-
-    # =========================================================
-    # TOP BAR
-    # =========================================================
-
-    def build_topbar(self):
-
-        self.topbar = ctk.CTkFrame(
-            self.main,
-            height=76,
-            fg_color=self.colors["bg"],
-            corner_radius=0
-        )
-
-        self.topbar.grid(
-            row=0,
-            column=0,
-            sticky="ew",
-            padx=25
-        )
-
-        self.topbar.grid_columnconfigure(
-            2,
-            weight=1
-        )
-
-        # Sidebar toggle
-
-        self.sidebar_button = ctk.CTkButton(
-            self.topbar,
-            text="☰",
-            width=45,
-            height=40,
-            corner_radius=10,
-            fg_color=self.colors["card"],
-            hover_color=self.colors["card_hover"],
-            text_color=self.colors["text"],
-            font=ctk.CTkFont(
-                size=18,
-                weight="bold"
-            ),
-            command=self.toggle_sidebar
-        )
-
-        self.sidebar_button.grid(
-            row=0,
-            column=0,
-            padx=(0, 15),
-            pady=18
-        )
-
-        # Page title
-
         self.page_title = ctk.CTkLabel(
-            self.topbar,
-            text="DASHBOARD",
+            topbar,
+            text="Dashboard",
             font=ctk.CTkFont(
-                size=14,
+                size=24,
                 weight="bold"
             ),
-            text_color=self.colors["text"]
+            text_color=TEXT_PRIMARY
         )
 
         self.page_title.grid(
             row=0,
-            column=1,
-            sticky="w"
+            column=0,
+            sticky="w",
+            pady=20
         )
 
-        # Right side
+        right = ctk.CTkFrame(
+            topbar,
+            fg_color="transparent"
+        )
 
-        self.status = ctk.CTkLabel(
-            self.topbar,
-            text="●  SYSTEM ONLINE",
+        right.grid(
+            row=0,
+            column=1,
+            sticky="e"
+        )
+
+        self.live_label = ctk.CTkLabel(
+            right,
+            text="● LIVE",
             font=ctk.CTkFont(
                 size=11,
                 weight="bold"
             ),
-            text_color=self.colors["success"]
+            text_color=SUCCESS
         )
 
-        self.status.grid(
-            row=0,
-            column=3,
+        self.live_label.pack(
+            side="left",
             padx=20
         )
 
-        self.clock = ctk.CTkLabel(
-            self.topbar,
+        self.clock_label = ctk.CTkLabel(
+            right,
             text="",
             font=ctk.CTkFont(
                 size=11
             ),
-            text_color=self.colors["muted"]
+            text_color=TEXT_SECONDARY
         )
 
-        self.clock.grid(
+        self.clock_label.pack(
+            side="left"
+        )
+
+        ctk.CTkLabel(
+            right,
+            text=f"  {self.username}",
+            font=ctk.CTkFont(
+                size=11,
+                weight="bold"
+            ),
+            text_color=TEXT_PRIMARY
+        ).pack(
+            side="left",
+            padx=(20, 0)
+        )
+
+    # ========================================================
+    # PAGE CREATOR
+    # ========================================================
+
+    def create_page(self):
+
+        page = ctk.CTkFrame(
+            self.content_container,
+            fg_color=BG_COLOR,
+            corner_radius=0
+        )
+
+        page.grid(
             row=0,
-            column=4,
-            padx=(10, 15)
+            column=0,
+            sticky="nsew"
         )
 
-        self.mode_button = ctk.CTkButton(
-            self.topbar,
-            text="☾",
-            width=42,
+        page.grid_rowconfigure(
+            0,
+            weight=1
+        )
+
+        page.grid_columnconfigure(
+            0,
+            weight=1
+        )
+
+        return page
+
+    # ========================================================
+    # DASHBOARD PAGE
+    # ========================================================
+
+    def create_dashboard_page(self):
+
+        page = self.create_page()
+
+        self.pages["Dashboard"] = page
+
+        page.grid_columnconfigure(
+            (0, 1, 2, 3),
+            weight=1
+        )
+
+        page.grid_rowconfigure(
+            2,
+            weight=1
+        )
+
+        # ----------------------------------------------------
+        # WELCOME
+        # ----------------------------------------------------
+
+        welcome = ctk.CTkFrame(
+            page,
+            fg_color=CARD_COLOR,
+            corner_radius=12
+        )
+
+        welcome.grid(
+            row=0,
+            column=0,
+            columnspan=4,
+            sticky="ew",
+            pady=(0, 15)
+        )
+
+        ctk.CTkLabel(
+            welcome,
+            text=f"Welcome back, {self.username}",
+            font=ctk.CTkFont(
+                size=21,
+                weight="bold"
+            ),
+            text_color=TEXT_PRIMARY
+        ).pack(
+            anchor="w",
+            padx=20,
+            pady=(18, 2)
+        )
+
+        ctk.CTkLabel(
+            welcome,
+            text=(
+                "Monitor employee agents and LeakGuard security activity."
+            ),
+            font=ctk.CTkFont(
+                size=11
+            ),
+            text_color=TEXT_SECONDARY
+        ).pack(
+            anchor="w",
+            padx=20,
+            pady=(0, 18)
+        )
+
+        # ----------------------------------------------------
+        # STAT CARDS
+        # ----------------------------------------------------
+
+        self.total_employees_value = self.create_stat_card(
+            page,
+            1,
+            0,
+            "TOTAL EMPLOYEES",
+            "0",
+            ACCENT
+        )
+
+        self.online_value = self.create_stat_card(
+            page,
+            1,
+            1,
+            "ONLINE",
+            "0",
+            SUCCESS
+        )
+
+        self.offline_value = self.create_stat_card(
+            page,
+            1,
+            2,
+            "OFFLINE",
+            "0",
+            WARNING
+        )
+
+        self.security_value = self.create_stat_card(
+            page,
+            1,
+            3,
+            "SECURITY EVENTS",
+            "0",
+            DANGER
+        )
+
+        # ----------------------------------------------------
+        # RECENT ACTIVITY
+        # ----------------------------------------------------
+
+        activity_card = ctk.CTkFrame(
+            page,
+            fg_color=CARD_COLOR,
+            corner_radius=12
+        )
+
+        activity_card.grid(
+            row=2,
+            column=0,
+            columnspan=2,
+            sticky="nsew",
+            padx=(0, 8),
+            pady=(15, 0)
+        )
+
+        ctk.CTkLabel(
+            activity_card,
+            text="RECENT ACTIVITY",
+            font=ctk.CTkFont(
+                size=12,
+                weight="bold"
+            ),
+            text_color=TEXT_PRIMARY
+        ).pack(
+            anchor="w",
+            padx=18,
+            pady=(15, 10)
+        )
+
+        self.dashboard_activity = ctk.CTkTextbox(
+            activity_card,
+            fg_color="transparent",
+            text_color=TEXT_SECONDARY,
+            font=ctk.CTkFont(
+                size=11
+            ),
+            border_width=0
+        )
+
+        self.dashboard_activity.pack(
+            fill="both",
+            expand=True,
+            padx=12,
+            pady=(0, 12)
+        )
+
+        self.dashboard_activity.configure(
+            state="disabled"
+        )
+
+        # ----------------------------------------------------
+        # SECURITY MONITOR
+        # ----------------------------------------------------
+
+        security_card = ctk.CTkFrame(
+            page,
+            fg_color=CARD_COLOR,
+            corner_radius=12
+        )
+
+        security_card.grid(
+            row=2,
+            column=2,
+            columnspan=2,
+            sticky="nsew",
+            padx=(8, 0),
+            pady=(15, 0)
+        )
+
+        ctk.CTkLabel(
+            security_card,
+            text="SECURITY MONITOR",
+            font=ctk.CTkFont(
+                size=12,
+                weight="bold"
+            ),
+            text_color=TEXT_PRIMARY
+        ).pack(
+            anchor="w",
+            padx=18,
+            pady=(15, 10)
+        )
+
+        self.dashboard_security = ctk.CTkTextbox(
+            security_card,
+            fg_color="transparent",
+            text_color=TEXT_SECONDARY,
+            font=ctk.CTkFont(
+                size=11
+            ),
+            border_width=0
+        )
+
+        self.dashboard_security.pack(
+            fill="both",
+            expand=True,
+            padx=12,
+            pady=(0, 12)
+        )
+
+        self.dashboard_security.configure(
+            state="disabled"
+        )
+
+    # ========================================================
+    # STAT CARD
+    # ========================================================
+
+    def create_stat_card(
+        self,
+        parent,
+        row,
+        column,
+        title,
+        value,
+        accent
+    ):
+
+        card = ctk.CTkFrame(
+            parent,
+            fg_color=CARD_COLOR,
+            corner_radius=12
+        )
+
+        card.grid(
+            row=row,
+            column=column,
+            sticky="ew",
+            padx=5
+        )
+
+        ctk.CTkLabel(
+            card,
+            text=title,
+            font=ctk.CTkFont(
+                size=9,
+                weight="bold"
+            ),
+            text_color=TEXT_MUTED
+        ).pack(
+            anchor="w",
+            padx=15,
+            pady=(14, 3)
+        )
+
+        value_label = ctk.CTkLabel(
+            card,
+            text=value,
+            font=ctk.CTkFont(
+                size=25,
+                weight="bold"
+            ),
+            text_color=accent
+        )
+
+        value_label.pack(
+            anchor="w",
+            padx=15,
+            pady=(0, 14)
+        )
+
+        return value_label
+
+    # ========================================================
+    # EMPLOYEES PAGE
+    # ========================================================
+
+    def create_employees_page(self):
+
+        page = self.create_page()
+
+        self.pages["Employees"] = page
+
+        page.grid_columnconfigure(
+            0,
+            weight=1
+        )
+
+        page.grid_rowconfigure(
+            1,
+            weight=1
+        )
+
+        # ----------------------------------------------------
+        # HEADER
+        # ----------------------------------------------------
+
+        header = ctk.CTkFrame(
+            page,
+            fg_color=CARD_COLOR,
+            corner_radius=12
+        )
+
+        header.grid(
+            row=0,
+            column=0,
+            sticky="ew",
+            pady=(0, 15)
+        )
+
+        ctk.CTkLabel(
+            header,
+            text="Employee Monitoring",
+            font=ctk.CTkFont(
+                size=18,
+                weight="bold"
+            ),
+            text_color=TEXT_PRIMARY
+        ).pack(
+            anchor="w",
+            padx=20,
+            pady=(16, 2)
+        )
+
+        ctk.CTkLabel(
+            header,
+            text=(
+                "Live status of registered LeakGuard agents."
+            ),
+            font=ctk.CTkFont(
+                size=11
+            ),
+            text_color=TEXT_SECONDARY
+        ).pack(
+            anchor="w",
+            padx=20,
+            pady=(0, 16)
+        )
+
+        # ----------------------------------------------------
+        # TABLE CARD
+        # ----------------------------------------------------
+
+        table = ctk.CTkFrame(
+            page,
+            fg_color=CARD_COLOR,
+            corner_radius=12
+        )
+
+        table.grid(
+            row=1,
+            column=0,
+            sticky="nsew"
+        )
+
+        for column, weight in enumerate(
+            [2, 2, 2, 1, 1, 1]
+        ):
+
+            table.grid_columnconfigure(
+                column,
+                weight=weight
+            )
+
+        self.employee_table = ctk.CTkFrame(
+            table,
+            fg_color="transparent"
+        )
+
+        self.employee_table.pack(
+            fill="both",
+            expand=True,
+            padx=15,
+            pady=15
+        )
+
+        self.refresh_employee_view()
+
+    # ========================================================
+    # ACTIVITY LOG PAGE
+    # ========================================================
+
+    def create_logs_page(self):
+
+        page = self.create_page()
+
+        self.pages["Activity Logs"] = page
+
+        page.grid_columnconfigure(
+            0,
+            weight=1
+        )
+
+        page.grid_rowconfigure(
+            1,
+            weight=1
+        )
+
+        ctk.CTkLabel(
+            page,
+            text="Activity Logs",
+            font=ctk.CTkFont(
+                size=20,
+                weight="bold"
+            ),
+            text_color=TEXT_PRIMARY
+        ).grid(
+            row=0,
+            column=0,
+            sticky="w",
+            pady=(0, 12)
+        )
+
+        card = ctk.CTkFrame(
+            page,
+            fg_color=CARD_COLOR,
+            corner_radius=12
+        )
+
+        card.grid(
+            row=1,
+            column=0,
+            sticky="nsew"
+        )
+
+        self.logs_text = ctk.CTkTextbox(
+            card,
+            fg_color="transparent",
+            text_color=TEXT_SECONDARY,
+            font=ctk.CTkFont(
+                size=11
+            ),
+            border_width=0
+        )
+
+        self.logs_text.pack(
+            fill="both",
+            expand=True,
+            padx=15,
+            pady=15
+        )
+
+        self.logs_text.configure(
+            state="disabled"
+        )
+
+    # ========================================================
+    # SECURITY EVENTS PAGE
+    # ========================================================
+
+    def create_security_page(self):
+
+        page = self.create_page()
+
+        self.pages["Security Events"] = page
+
+        page.grid_columnconfigure(
+            0,
+            weight=1
+        )
+
+        page.grid_rowconfigure(
+            1,
+            weight=1
+        )
+
+        ctk.CTkLabel(
+            page,
+            text="Security Events",
+            font=ctk.CTkFont(
+                size=20,
+                weight="bold"
+            ),
+            text_color=TEXT_PRIMARY
+        ).grid(
+            row=0,
+            column=0,
+            sticky="w",
+            pady=(0, 12)
+        )
+
+        card = ctk.CTkFrame(
+            page,
+            fg_color=CARD_COLOR,
+            corner_radius=12
+        )
+
+        card.grid(
+            row=1,
+            column=0,
+            sticky="nsew"
+        )
+
+        self.security_text = ctk.CTkTextbox(
+            card,
+            fg_color="transparent",
+            text_color=TEXT_SECONDARY,
+            font=ctk.CTkFont(
+                size=11
+            ),
+            border_width=0
+        )
+
+        self.security_text.pack(
+            fill="both",
+            expand=True,
+            padx=15,
+            pady=15
+        )
+
+        self.security_text.configure(
+            state="disabled"
+        )
+
+    # ========================================================
+    # REPORTS PAGE
+    # ========================================================
+
+    def create_reports_page(self):
+
+        page = self.create_page()
+
+        self.pages["Reports"] = page
+
+        page.grid_columnconfigure(
+            (0, 1, 2),
+            weight=1
+        )
+
+        page.grid_rowconfigure(
+            2,
+            weight=1
+        )
+
+        ctk.CTkLabel(
+            page,
+            text="Security Reports",
+            font=ctk.CTkFont(
+                size=20,
+                weight="bold"
+            ),
+            text_color=TEXT_PRIMARY
+        ).grid(
+            row=0,
+            column=0,
+            columnspan=3,
+            sticky="w",
+            pady=(0, 15)
+        )
+
+        self.report_total = self.create_report_card(
+            page,
+            1,
+            0,
+            "TOTAL EVENTS",
+            "0"
+        )
+
+        self.report_security = self.create_report_card(
+            page,
+            1,
+            1,
+            "SECURITY EVENTS",
+            "0"
+        )
+
+        self.report_activity = self.create_report_card(
+            page,
+            1,
+            2,
+            "ACTIVITY EVENTS",
+            "0"
+        )
+
+        report_card = ctk.CTkFrame(
+            page,
+            fg_color=CARD_COLOR,
+            corner_radius=12
+        )
+
+        report_card.grid(
+            row=2,
+            column=0,
+            columnspan=3,
+            sticky="nsew",
+            pady=(15, 0)
+        )
+
+        ctk.CTkLabel(
+            report_card,
+            text="Report Center",
+            font=ctk.CTkFont(
+                size=15,
+                weight="bold"
+            ),
+            text_color=TEXT_PRIMARY
+        ).pack(
+            anchor="w",
+            padx=20,
+            pady=(20, 5)
+        )
+
+        ctk.CTkLabel(
+            report_card,
+            text=(
+                "Generate a summary of employee activity "
+                "and LeakGuard security events."
+            ),
+            font=ctk.CTkFont(
+                size=11
+            ),
+            text_color=TEXT_SECONDARY
+        ).pack(
+            anchor="w",
+            padx=20
+        )
+
+        ctk.CTkButton(
+            report_card,
+            text="Generate Report",
+            width=160,
             height=40,
-            corner_radius=10,
-            fg_color=self.colors["card"],
-            hover_color=self.colors["card_hover"],
-            text_color=self.colors["text"],
-            font=ctk.CTkFont(size=17),
-            command=self.toggle_theme
+            corner_radius=8,
+            fg_color=ACCENT_DARK,
+            hover_color=ACCENT,
+            text_color=TEXT_PRIMARY,
+            command=self.generate_report
+        ).pack(
+            anchor="w",
+            padx=20,
+            pady=20
         )
 
-        self.mode_button.grid(
+    # ========================================================
+    # REPORT CARD
+    # ========================================================
+
+    def create_report_card(
+        self,
+        parent,
+        row,
+        column,
+        title,
+        value
+    ):
+
+        card = ctk.CTkFrame(
+            parent,
+            fg_color=CARD_COLOR,
+            corner_radius=12
+        )
+
+        card.grid(
+            row=row,
+            column=column,
+            sticky="ew",
+            padx=5
+        )
+
+        ctk.CTkLabel(
+            card,
+            text=title,
+            font=ctk.CTkFont(
+                size=9,
+                weight="bold"
+            ),
+            text_color=TEXT_MUTED
+        ).pack(
+            anchor="w",
+            padx=15,
+            pady=(14, 2)
+        )
+
+        value_label = ctk.CTkLabel(
+            card,
+            text=value,
+            font=ctk.CTkFont(
+                size=25,
+                weight="bold"
+            ),
+            text_color=PURPLE
+        )
+
+        value_label.pack(
+            anchor="w",
+            padx=15,
+            pady=(0, 14)
+        )
+
+        return value_label
+
+    # ========================================================
+    # SETTINGS PAGE
+    # ========================================================
+
+    def create_settings_page(self):
+
+        page = self.create_page()
+
+        self.pages["Settings"] = page
+
+        ctk.CTkLabel(
+            page,
+            text="System Settings",
+            font=ctk.CTkFont(
+                size=20,
+                weight="bold"
+            ),
+            text_color=TEXT_PRIMARY
+        ).pack(
+            anchor="w",
+            pady=(0, 15)
+        )
+
+        card = ctk.CTkFrame(
+            page,
+            fg_color=CARD_COLOR,
+            corner_radius=12
+        )
+
+        card.pack(
+            fill="x"
+        )
+
+        self.add_setting(
+            card,
+            "Backend Server",
+            self.backend_url
+        )
+
+        self.add_setting(
+            card,
+            "WebSocket",
+            "ws://127.0.0.1:8000/ws/admin"
+        )
+
+        self.add_setting(
+            card,
+            "Admin User",
+            self.username
+        )
+
+        self.add_setting(
+            card,
+            "Connection",
+            "Live WebSocket monitoring enabled"
+        )
+
+    # ========================================================
+    # SETTING ROW
+    # ========================================================
+
+    def add_setting(
+        self,
+        parent,
+        title,
+        value
+    ):
+
+        row = ctk.CTkFrame(
+            parent,
+            fg_color="transparent"
+        )
+
+        row.pack(
+            fill="x",
+            padx=20,
+            pady=12
+        )
+
+        ctk.CTkLabel(
+            row,
+            text=title,
+            font=ctk.CTkFont(
+                size=11,
+                weight="bold"
+            ),
+            text_color=TEXT_PRIMARY
+        ).pack(
+            anchor="w"
+        )
+
+        ctk.CTkLabel(
+            row,
+            text=value,
+            font=ctk.CTkFont(
+                size=11
+            ),
+            text_color=TEXT_SECONDARY
+        ).pack(
+            anchor="w",
+            pady=(3, 0)
+        )
+
+    # ========================================================
+    # PAGE NAVIGATION
+    # ========================================================
+
+    def show_page(
+        self,
+        page_name
+    ):
+
+        if page_name not in self.pages:
+            return
+
+        self.current_page = page_name
+
+        # Hide all pages
+
+        for page in self.pages.values():
+
+            page.grid_remove()
+
+        # Show selected page
+
+        selected_page = self.pages[page_name]
+
+        selected_page.grid(
             row=0,
-            column=5
+            column=0,
+            sticky="nsew"
         )
 
-    # =========================================================
-    # SIDEBAR TOGGLE
-    # =========================================================
+        selected_page.tkraise()
 
-    def toggle_sidebar(self):
-
-        if self.sidebar_open:
-
-            self.sidebar.grid_remove()
-
-            self.sidebar_open = False
-
-        else:
-
-            self.sidebar.grid()
-
-            self.sidebar_open = True
-
-    # =========================================================
-    # NAVIGATION
-    # =========================================================
-
-    def navigate(self, page):
-
-        self.current_page = page
-
-        self.set_active(page)
+        # Update title
 
         self.page_title.configure(
-            text=page.upper()
+            text=page_name
         )
 
-        self.clear_content()
-
-        if page == "Dashboard":
-            self.show_dashboard()
-
-        elif page == "Employees":
-            self.show_employees()
-
-        elif page == "Activity Logs":
-            self.show_logs()
-
-        elif page == "Security Events":
-            self.show_security()
-
-        elif page == "Reports":
-            self.show_reports()
-
-        elif page == "Settings":
-            self.show_settings()
-
-    def set_active(self, active):
+        # Update navigation
 
         for name, button in self.nav_buttons.items():
 
-            if name == active:
+            if name == page_name:
 
                 button.configure(
-                    fg_color=self.colors["primary"],
-                    hover_color=self.colors["primary_hover"],
-                    text_color="#FFFFFF"
+                    fg_color=ACCENT_DARK,
+                    text_color=TEXT_PRIMARY
                 )
 
             else:
 
                 button.configure(
                     fg_color="transparent",
-                    hover_color=self.colors["card_hover"],
-                    text_color=self.colors["muted"]
+                    text_color=TEXT_SECONDARY
                 )
 
-    def clear_content(self):
+        # Page refresh
 
-        for widget in self.content.winfo_children():
-            widget.destroy()
+        if page_name == "Employees":
+            self.refresh_employee_view()
 
-    # =========================================================
-    # DASHBOARD
-    # =========================================================
+        elif page_name == "Activity Logs":
+            self.update_logs_view()
 
-    def show_dashboard(self):
+        elif page_name == "Security Events":
+            self.update_security_view()
 
-        # Header
+        elif page_name == "Reports":
+            self.update_reports()
 
-        ctk.CTkLabel(
-            self.content,
-            text="Security Overview",
-            font=ctk.CTkFont(
-                size=30,
-                weight="bold"
-            ),
-            text_color=self.colors["text"]
-        ).pack(
-            anchor="w",
-            pady=(10, 3)
+    # ========================================================
+    # BACKEND - LOAD EMPLOYEES
+    # ========================================================
+
+    def load_employees(self):
+
+        try:
+
+            response = httpx.get(
+                f"{self.backend_url}/employees/",
+                timeout=5
+            )
+
+            response.raise_for_status()
+
+            data = response.json()
+
+            if isinstance(data, dict):
+
+                employees = data.get(
+                    "employees",
+                    []
+                )
+
+            else:
+
+                employees = data
+
+            self.employee_status.clear()
+
+            for employee in employees:
+
+                employee_id = employee.get(
+                    "id"
+                )
+
+                if employee_id is None:
+                    continue
+
+                self.employee_status[
+                    employee_id
+                ] = {
+
+                    "username": employee.get(
+                        "username",
+                        "Unknown"
+                    ),
+
+                    "display_name": employee.get(
+                        "display_name",
+                        employee.get(
+                            "username",
+                            "Unknown"
+                        )
+                    ),
+
+                    "role": employee.get(
+                        "role",
+                        "EMPLOYEE"
+                    ),
+
+                    "agent_id": employee.get(
+                        "agent_id",
+                        "Unknown"
+                    ),
+
+                    "machine_name": employee.get(
+                        "machine_name",
+                        "Unknown"
+                    ),
+
+                    "status": employee.get(
+                        "status",
+                        "OFFLINE"
+                    ),
+
+                    "last_seen": self.format_last_seen(
+                        employee.get(
+                            "last_seen"
+                        )
+                    )
+                }
+
+            self.refresh_employee_view()
+            self.update_dashboard_statistics()
+
+            self.system_status.configure(
+                text="Backend Connected"
+            )
+
+            self.system_dot.configure(
+                text_color=SUCCESS
+            )
+
+        except Exception as error:
+
+            print(
+                f"[ADMIN API] Could not load employees: {error}"
+            )
+
+            self.system_status.configure(
+                text="Backend Disconnected"
+            )
+
+            self.system_dot.configure(
+                text_color=DANGER
+            )
+
+    # ========================================================
+    # BACKEND - LOAD LOGS
+    # ========================================================
+
+    def load_logs(self):
+
+        try:
+
+            response = httpx.get(
+                f"{self.backend_url}/admin/logs",
+                timeout=5
+            )
+
+            response.raise_for_status()
+
+            data = response.json()
+
+            if isinstance(data, dict):
+
+                logs = data.get(
+                    "logs",
+                    data.get(
+                        "activity_logs",
+                        []
+                    )
+                )
+
+            else:
+
+                logs = data
+
+            self.activity_events.clear()
+
+            for log in logs:
+
+                timestamp = log.get(
+                    "timestamp",
+                    ""
+                )
+
+                description = log.get(
+                    "description",
+                    log.get(
+                        "event_type",
+                        "Activity event"
+                    )
+                )
+
+                employee_id = log.get(
+                    "employee_id",
+                    "Unknown"
+                )
+
+                entry = (
+                    f"{self.format_last_seen(timestamp)}  "
+                    f"[Employee {employee_id}]  "
+                    f"{description}"
+                )
+
+                self.activity_events.append(
+                    entry
+                )
+
+            self.activity_events = (
+                self.activity_events[-100:]
+            )
+
+            self.update_logs_view()
+            self.update_dashboard_activity()
+            self.update_reports()
+
+        except Exception as error:
+
+            print(
+                f"[ADMIN API] Could not load logs: {error}"
+            )
+
+    # ========================================================
+    # BACKEND - PERIODIC REFRESH
+    # ========================================================
+
+    def refresh_backend_data(self):
+
+        if not self.parent.winfo_exists():
+            return
+
+        self.load_employees()
+        self.load_logs()
+
+        self.parent.after(
+            5000,
+            self.refresh_backend_data
         )
 
-        ctk.CTkLabel(
-            self.content,
-            text="Monitor resource leaks, system activity and security health.",
-            font=ctk.CTkFont(
-                size=13
-            ),
-            text_color=self.colors["muted"]
-        ).pack(
-            anchor="w",
-            pady=(0, 25)
-        )
+    # ========================================================
+    # DATE FORMATTER
+    # ========================================================
 
-        # Stats
-
-        stats = ctk.CTkFrame(
-            self.content,
-            fg_color="transparent"
-        )
-
-        stats.pack(
-            fill="x",
-            pady=(0, 25)
-        )
-
-        stats.grid_columnconfigure(
-            (0, 1, 2, 3),
-            weight=1
-        )
-
-        self.create_stat_card(
-            stats,
-            0,
-            "128",
-            "TOTAL SCANS",
-            "↑ 18% this month",
-            self.colors["primary"]
-        )
-
-        self.create_stat_card(
-            stats,
-            1,
-            "94",
-            "PASSED",
-            "73.4% success rate",
-            self.colors["success"]
-        )
-
-        self.create_stat_card(
-            stats,
-            2,
-            "7",
-            "SECURITY ALERTS",
-            "2 require attention",
-            self.colors["warning"]
-        )
-
-        self.create_stat_card(
-            stats,
-            3,
-            "3",
-            "RESOURCE LEAKS",
-            "Build blocking issues",
-            self.colors["danger"]
-        )
-
-        # Lower section
-
-        lower = ctk.CTkFrame(
-            self.content,
-            fg_color="transparent"
-        )
-
-        lower.pack(
-            fill="both",
-            expand=True
-        )
-
-        lower.grid_columnconfigure(
-            0,
-            weight=2
-        )
-
-        lower.grid_columnconfigure(
-            1,
-            weight=1
-        )
-
-        self.create_activity_panel(lower)
-        self.create_health_panel(lower)
-
-    # =========================================================
-    # STAT CARD
-    # =========================================================
-
-    def create_stat_card(
+    def format_last_seen(
         self,
-        parent,
-        column,
-        value,
-        title,
-        description,
-        accent
+        value
     ):
 
-        card = ctk.CTkFrame(
-            parent,
-            fg_color=self.colors["card"],
-            corner_radius=14,
-            border_width=1,
-            border_color=self.colors["border"]
+        if not value:
+            return "Never"
+
+        try:
+
+            if isinstance(
+                value,
+                str
+            ):
+
+                parsed = datetime.fromisoformat(
+                    value.replace(
+                        "Z",
+                        "+00:00"
+                    )
+                )
+
+                return parsed.strftime(
+                    "%H:%M:%S"
+                )
+
+        except Exception:
+            pass
+
+        return str(value)
+
+    # ========================================================
+    # WEBSOCKET MESSAGE
+    # ========================================================
+
+    def handle_websocket_message(
+        self,
+        message
+    ):
+
+        try:
+
+            data = json.loads(
+                message
+            )
+
+            event_type = data.get(
+                "type"
+            )
+
+            # ------------------------------------------------
+            # EMPLOYEE STATUS
+            # ------------------------------------------------
+
+            if event_type == "EMPLOYEE_STATUS":
+
+                self.parent.after(
+                    0,
+                    lambda d=data:
+                    self.handle_employee_status(d)
+                )
+
+            # ------------------------------------------------
+            # SECURITY EVENT
+            # ------------------------------------------------
+
+            elif event_type == "SECURITY_EVENT":
+
+                self.parent.after(
+                    0,
+                    lambda d=data:
+                    self.handle_security_event(d)
+                )
+
+            # ------------------------------------------------
+            # ACTIVITY EVENT
+            # ------------------------------------------------
+
+            elif event_type == "ACTIVITY_EVENT":
+
+                self.parent.after(
+                    0,
+                    lambda d=data:
+                    self.handle_activity_event(d)
+                )
+
+        except json.JSONDecodeError:
+
+            print(
+                "[ADMIN WS] Invalid JSON received"
+            )
+
+        except Exception as error:
+
+            print(
+                f"[ADMIN WS] Message handling error: {error}"
+            )
+
+    # ========================================================
+    # EMPLOYEE STATUS EVENT
+    # ========================================================
+
+    def handle_employee_status(
+        self,
+        data
+    ):
+
+        employee_id = data.get(
+            "employee_id"
         )
 
-        card.grid(
-            row=0,
-            column=column,
-            sticky="ew",
-            padx=6
-        )
+        if employee_id is None:
+            return
 
-        ctk.CTkLabel(
-            card,
-            text=title,
-            font=ctk.CTkFont(
-                size=10,
-                weight="bold"
+        self.employee_status[
+            employee_id
+        ] = {
+
+            "username": data.get(
+                "username",
+                "Unknown"
             ),
-            text_color=self.colors["muted"]
-        ).pack(
-            anchor="w",
-            padx=18,
-            pady=(18, 2)
-        )
 
-        ctk.CTkLabel(
-            card,
-            text=value,
-            font=ctk.CTkFont(
-                size=32,
-                weight="bold"
+            "display_name": data.get(
+                "display_name",
+                data.get(
+                    "username",
+                    "Unknown"
+                )
             ),
-            text_color=self.colors["text"]
-        ).pack(
-            anchor="w",
-            padx=18
-        )
 
-        ctk.CTkLabel(
-            card,
-            text=description,
-            font=ctk.CTkFont(
-                size=10
+            "role": data.get(
+                "role",
+                "EMPLOYEE"
             ),
-            text_color=accent
-        ).pack(
-            anchor="w",
-            padx=18,
-            pady=(2, 18)
-        )
 
-    # =========================================================
-    # ACTIVITY PANEL
-    # =========================================================
-
-    def create_activity_panel(self, parent):
-
-        panel = ctk.CTkFrame(
-            parent,
-            fg_color=self.colors["card"],
-            corner_radius=14,
-            border_width=1,
-            border_color=self.colors["border"]
-        )
-
-        panel.grid(
-            row=0,
-            column=0,
-            sticky="nsew",
-            padx=(0, 10)
-        )
-
-        ctk.CTkLabel(
-            panel,
-            text="Recent Activity",
-            font=ctk.CTkFont(
-                size=16,
-                weight="bold"
+            "agent_id": data.get(
+                "agent_id",
+                "Unknown"
             ),
-            text_color=self.colors["text"]
-        ).pack(
-            anchor="w",
-            padx=20,
-            pady=(20, 2)
-        )
 
-        ctk.CTkLabel(
-            panel,
-            text="Latest administrator and analyzer events",
-            font=ctk.CTkFont(size=10),
-            text_color=self.colors["muted"]
-        ).pack(
-            anchor="w",
-            padx=20,
-            pady=(0, 15)
-        )
-
-        activities = [
-            ("Resource scan completed", "main.py", "2 min ago", "success"),
-            ("Leak detected", "database.py", "18 min ago", "danger"),
-            ("Employee permissions updated", "admin", "42 min ago", "info"),
-            ("Security report generated", "weekly", "1 hr ago", "info"),
-            ("CI build blocked", "workflow", "2 hrs ago", "danger"),
-        ]
-
-        for title, target, time, state in activities:
-
-            row = ctk.CTkFrame(
-                panel,
-                fg_color="transparent"
-            )
-
-            row.pack(
-                fill="x",
-                padx=18,
-                pady=4
-            )
-
-            indicator_color = self.colors[state]
-
-            ctk.CTkLabel(
-                row,
-                text="●",
-                font=ctk.CTkFont(size=13),
-                text_color=indicator_color
-            ).pack(
-                side="left"
-            )
-
-            info = ctk.CTkFrame(
-                row,
-                fg_color="transparent"
-            )
-
-            info.pack(
-                side="left",
-                padx=10
-            )
-
-            ctk.CTkLabel(
-                info,
-                text=title,
-                font=ctk.CTkFont(
-                    size=11,
-                    weight="bold"
-                ),
-                text_color=self.colors["text"]
-            ).pack(anchor="w")
-
-            ctk.CTkLabel(
-                info,
-                text=target,
-                font=ctk.CTkFont(size=9),
-                text_color=self.colors["muted"]
-            ).pack(anchor="w")
-
-            ctk.CTkLabel(
-                row,
-                text=time,
-                font=ctk.CTkFont(size=9),
-                text_color=self.colors["dim"]
-            ).pack(
-                side="right"
-            )
-
-    # =========================================================
-    # HEALTH PANEL
-    # =========================================================
-
-    def create_health_panel(self, parent):
-
-        panel = ctk.CTkFrame(
-            parent,
-            fg_color=self.colors["card"],
-            corner_radius=14,
-            border_width=1,
-            border_color=self.colors["border"]
-        )
-
-        panel.grid(
-            row=0,
-            column=1,
-            sticky="nsew",
-            padx=(10, 0)
-        )
-
-        ctk.CTkLabel(
-            panel,
-            text="System Health",
-            font=ctk.CTkFont(
-                size=16,
-                weight="bold"
+            "machine_name": data.get(
+                "machine_name",
+                "Unknown"
             ),
-            text_color=self.colors["text"]
-        ).pack(
-            anchor="w",
-            padx=20,
-            pady=(20, 2)
-        )
 
-        ctk.CTkLabel(
-            panel,
-            text="Current infrastructure status",
-            font=ctk.CTkFont(size=10),
-            text_color=self.colors["muted"]
-        ).pack(
-            anchor="w",
-            padx=20,
-            pady=(0, 20)
-        )
+            "status": data.get(
+                "status",
+                "UNKNOWN"
+            ),
 
-        health = [
-            ("Analyzer Engine", "Operational", self.colors["success"]),
-            ("Resource Tracker", "Operational", self.colors["success"]),
-            ("CI Integration", "Operational", self.colors["success"]),
-            ("Security Database", "Operational", self.colors["success"]),
-        ]
-
-        for name, status, color in health:
-
-            row = ctk.CTkFrame(
-                panel,
-                fg_color="transparent"
+            "last_seen": datetime.now().strftime(
+                "%H:%M:%S"
             )
+        }
 
-            row.pack(
-                fill="x",
-                padx=20,
-                pady=8
+        machine = data.get(
+            "machine_name",
+            "Unknown machine"
+        )
+
+        status = data.get(
+            "status",
+            "UNKNOWN"
+        )
+
+        self.add_activity(
+            f"{machine} changed status to {status}"
+        )
+
+        self.refresh_employee_view()
+        self.update_dashboard_statistics()
+
+    # ========================================================
+    # SECURITY EVENT
+    # ========================================================
+
+    def handle_security_event(
+        self,
+        data
+    ):
+
+        description = data.get(
+            "description",
+            "Security event received"
+        )
+
+        severity = data.get(
+            "severity",
+            "INFO"
+        )
+
+        event = {
+
+            "description": description,
+
+            "severity": severity,
+
+            "time": datetime.now().strftime(
+                "%H:%M:%S"
             )
+        }
 
-            ctk.CTkLabel(
-                row,
-                text=name,
-                font=ctk.CTkFont(size=10),
-                text_color=self.colors["text"]
-            ).pack(side="left")
-
-            ctk.CTkLabel(
-                row,
-                text=f"● {status}",
-                font=ctk.CTkFont(
-                    size=9,
-                    weight="bold"
-                ),
-                text_color=color
-            ).pack(side="right")
-
-    # =========================================================
-    # EMPLOYEES
-    # =========================================================
-
-    def show_employees(self):
-
-        self.page_header(
-            "Employees",
-            "Manage employees, roles and system access."
+        self.security_events.append(
+            event
         )
 
-        actions = ctk.CTkFrame(
-            self.content,
-            fg_color="transparent"
+        self.security_events = (
+            self.security_events[-100:]
         )
 
-        actions.pack(
-            fill="x",
-            pady=(0, 20)
+        self.add_security_event(
+            f"[{severity}] {description}"
         )
 
-        ctk.CTkButton(
-            actions,
-            text="+  ADD EMPLOYEE",
-            height=40,
-            corner_radius=9,
-            fg_color=self.colors["primary"],
-            hover_color=self.colors["primary_hover"],
-            font=ctk.CTkFont(
-                size=11,
-                weight="bold"
-            )
-        ).pack(side="right")
+        self.update_dashboard_statistics()
 
-        employees = [
-            ("EMP-001", "Aarav Sharma", "Security Analyst", "Active"),
-            ("EMP-002", "Riya Patel", "Developer", "Active"),
-            ("EMP-003", "Karan Mehta", "DevOps Engineer", "Active"),
-            ("EMP-004", "Neha Rao", "System Administrator", "Active"),
-            ("EMP-005", "Vikram Singh", "Developer", "Suspended"),
-        ]
+    # ========================================================
+    # ACTIVITY EVENT
+    # ========================================================
 
-        table = ctk.CTkFrame(
-            self.content,
-            fg_color=self.colors["card"],
-            corner_radius=14,
-            border_width=1,
-            border_color=self.colors["border"]
+    def handle_activity_event(
+        self,
+        data
+    ):
+
+        description = data.get(
+            "description",
+            "Activity event received"
         )
 
-        table.pack(
-            fill="both",
-            expand=True
+        self.add_activity(
+            description
         )
+
+    # ========================================================
+    # EMPLOYEE TABLE
+    # ========================================================
+
+    def refresh_employee_view(self):
+
+        if not hasattr(
+            self,
+            "employee_table"
+        ):
+            return
+
+        for widget in self.employee_table.winfo_children():
+
+            widget.destroy()
+
+        # ----------------------------------------------------
+        # HEADERS
+        # ----------------------------------------------------
 
         headers = [
-            "EMPLOYEE ID",
-            "NAME",
+            "EMPLOYEE",
+            "MACHINE",
+            "AGENT ID",
             "ROLE",
             "STATUS",
-            "ACTION"
+            "LAST SEEN"
         ]
 
-        for i, header in enumerate(headers):
-
-            table.grid_columnconfigure(
-                i,
-                weight=1
-            )
+        for column, header in enumerate(headers):
 
             ctk.CTkLabel(
-                table,
+                self.employee_table,
                 text=header,
                 font=ctk.CTkFont(
-                    size=9,
+                    size=10,
                     weight="bold"
                 ),
-                text_color=self.colors["muted"]
+                text_color=TEXT_MUTED
             ).grid(
                 row=0,
-                column=i,
+                column=column,
                 sticky="w",
-                padx=18,
-                pady=18
+                padx=10,
+                pady=(5, 12)
             )
 
-        for row_index, employee in enumerate(
-            employees,
+        # ----------------------------------------------------
+        # NO EMPLOYEES
+        # ----------------------------------------------------
+
+        if not self.employee_status:
+
+            ctk.CTkLabel(
+                self.employee_table,
+                text="No registered employee agents found.",
+                font=ctk.CTkFont(
+                    size=12
+                ),
+                text_color=TEXT_SECONDARY
+            ).grid(
+                row=1,
+                column=0,
+                columnspan=6,
+                pady=40
+            )
+
+            return
+
+        # ----------------------------------------------------
+        # EMPLOYEE ROWS
+        # ----------------------------------------------------
+
+        for row, employee in enumerate(
+            self.employee_status.values(),
             start=1
         ):
 
-            for column_index, value in enumerate(employee):
+            employee_name = employee.get(
+                "display_name",
+                employee.get(
+                    "username",
+                    "Unknown"
+                )
+            )
 
-                if column_index == 3:
+            machine = employee.get(
+                "machine_name",
+                "Unknown"
+            )
 
-                    status_color = (
-                        self.colors["success"]
-                        if value == "Active"
-                        else self.colors["danger"]
-                    )
+            agent = employee.get(
+                "agent_id",
+                "Unknown"
+            )
 
-                    ctk.CTkLabel(
-                        table,
-                        text=f"● {value}",
-                        font=ctk.CTkFont(size=10),
-                        text_color=status_color
-                    ).grid(
-                        row=row_index,
-                        column=column_index,
-                        sticky="w",
-                        padx=18,
-                        pady=15
-                    )
+            role = employee.get(
+                "role",
+                "EMPLOYEE"
+            )
 
-                elif column_index == 4:
+            status = employee.get(
+                "status",
+                "OFFLINE"
+            )
 
-                    ctk.CTkButton(
-                        table,
-                        text="VIEW",
-                        width=70,
-                        height=30,
-                        corner_radius=7,
-                        fg_color=self.colors["input"],
-                        hover_color=self.colors["card_hover"],
-                        text_color=self.colors["text"],
-                        font=ctk.CTkFont(
-                            size=9,
-                            weight="bold"
-                        )
-                    ).grid(
-                        row=row_index,
-                        column=column_index,
-                        padx=18,
-                        pady=8
-                    )
+            last_seen = employee.get(
+                "last_seen",
+                "-"
+            )
+
+            # Status color
+
+            if status == "ONLINE":
+
+                status_color = SUCCESS
+
+            elif status == "OFFLINE":
+
+                status_color = DANGER
+
+            else:
+
+                status_color = WARNING
+
+            values = [
+                employee_name,
+                machine,
+                agent,
+                role,
+                status,
+                last_seen
+            ]
+
+            for column, value in enumerate(values):
+
+                if column == 4:
+
+                    text_color = status_color
+                    font_weight = "bold"
 
                 else:
 
-                    ctk.CTkLabel(
-                        table,
-                        text=value,
-                        font=ctk.CTkFont(size=10),
-                        text_color=self.colors["text"]
-                    ).grid(
-                        row=row_index,
-                        column=column_index,
-                        sticky="w",
-                        padx=18,
-                        pady=15
-                    )
+                    text_color = TEXT_SECONDARY
+                    font_weight = "normal"
 
-    # =========================================================
-    # ACTIVITY LOGS
-    # =========================================================
-
-    def show_logs(self):
-
-        self.page_header(
-            "Activity Logs",
-            "Complete audit trail of administrator and system activity."
-        )
-
-        logs = [
-            ("10:42:31", "ADMIN", "Login successful", "Authentication"),
-            ("10:38:14", "SYSTEM", "Resource scan completed", "Analyzer"),
-            ("10:21:06", "ADMIN", "Permissions viewed", "Access Control"),
-            ("09:57:42", "SYSTEM", "Leak detected in database.py", "Security"),
-            ("09:31:20", "CI", "Build blocked", "Pipeline"),
-            ("09:12:18", "ADMIN", "Security report generated", "Reports"),
-        ]
-
-        for time, actor, action, category in logs:
-
-            card = ctk.CTkFrame(
-                self.content,
-                fg_color=self.colors["card"],
-                corner_radius=10,
-                border_width=1,
-                border_color=self.colors["border"]
-            )
-
-            card.pack(
-                fill="x",
-                pady=5
-            )
-
-            ctk.CTkLabel(
-                card,
-                text=time,
-                width=90,
-                font=ctk.CTkFont(
-                    size=10,
-                    weight="bold"
-                ),
-                text_color=self.colors["muted"]
-            ).pack(
-                side="left",
-                padx=15,
-                pady=15
-            )
-
-            ctk.CTkLabel(
-                card,
-                text=actor,
-                width=80,
-                font=ctk.CTkFont(
-                    size=10,
-                    weight="bold"
-                ),
-                text_color=self.colors["primary"]
-            ).pack(
-                side="left"
-            )
-
-            ctk.CTkLabel(
-                card,
-                text=action,
-                font=ctk.CTkFont(
-                    size=11,
-                    weight="bold"
-                ),
-                text_color=self.colors["text"]
-            ).pack(
-                side="left",
-                padx=10
-            )
-
-            ctk.CTkLabel(
-                card,
-                text=category,
-                font=ctk.CTkFont(size=9),
-                text_color=self.colors["muted"]
-            ).pack(
-                side="right",
-                padx=20
-            )
-
-    # =========================================================
-    # SECURITY EVENTS
-    # =========================================================
-
-    def show_security(self):
-
-        self.page_header(
-            "Security Events",
-            "Threats, resource leaks and policy violations detected by LeakGuard."
-        )
-
-        events = [
-            (
-                "CRITICAL",
-                "Resource leak detected",
-                "database.py",
-                "Connection opened without guaranteed close.",
-                self.colors["danger"]
-            ),
-            (
-                "HIGH",
-                "Build blocked by LeakGuard",
-                "CI Pipeline",
-                "Static analysis returned exit code 1.",
-                self.colors["warning"]
-            ),
-            (
-                "MEDIUM",
-                "Repeated scan failure",
-                "payment.py",
-                "Analyzer encountered an unsupported pattern.",
-                self.colors["warning"]
-            ),
-        ]
-
-        for severity, title, target, description, color in events:
-
-            card = ctk.CTkFrame(
-                self.content,
-                fg_color=self.colors["card"],
-                corner_radius=14,
-                border_width=1,
-                border_color=self.colors["border"]
-            )
-
-            card.pack(
-                fill="x",
-                pady=7
-            )
-
-            ctk.CTkLabel(
-                card,
-                text=severity,
-                width=80,
-                height=30,
-                corner_radius=7,
-                fg_color=color,
-                text_color="#FFFFFF",
-                font=ctk.CTkFont(
-                    size=9,
-                    weight="bold"
+                ctk.CTkLabel(
+                    self.employee_table,
+                    text=str(value),
+                    font=ctk.CTkFont(
+                        size=11,
+                        weight=font_weight
+                    ),
+                    text_color=text_color
+                ).grid(
+                    row=row,
+                    column=column,
+                    sticky="w",
+                    padx=10,
+                    pady=10
                 )
-            ).pack(
-                side="left",
-                padx=18,
-                pady=18
-            )
 
-            info = ctk.CTkFrame(
-                card,
-                fg_color="transparent"
-            )
+    # ========================================================
+    # DASHBOARD STATISTICS
+    # ========================================================
 
-            info.pack(
-                side="left",
-                fill="x",
-                expand=True,
-                padx=5,
-                pady=14
-            )
+    def update_dashboard_statistics(self):
 
-            ctk.CTkLabel(
-                info,
-                text=title,
-                font=ctk.CTkFont(
-                    size=12,
-                    weight="bold"
-                ),
-                text_color=self.colors["text"]
-            ).pack(anchor="w")
-
-            ctk.CTkLabel(
-                info,
-                text=target,
-                font=ctk.CTkFont(size=9),
-                text_color=color
-            ).pack(anchor="w")
-
-            ctk.CTkLabel(
-                info,
-                text=description,
-                font=ctk.CTkFont(size=10),
-                text_color=self.colors["muted"]
-            ).pack(anchor="w")
-
-            ctk.CTkButton(
-                card,
-                text="INSPECT",
-                width=85,
-                height=32,
-                corner_radius=8,
-                fg_color=self.colors["input"],
-                hover_color=self.colors["card_hover"],
-                text_color=self.colors["text"],
-                font=ctk.CTkFont(
-                    size=9,
-                    weight="bold"
-                )
-            ).pack(
-                side="right",
-                padx=18
-            )
-
-    # =========================================================
-    # REPORTS
-    # =========================================================
-
-    def show_reports(self):
-
-        self.page_header(
-            "Reports",
-            "Generate and review security analysis reports."
+        total = len(
+            self.employee_status
         )
 
-        reports = [
-            ("Weekly Security Report", "128 scans • 3 leaks", "Generated today"),
-            ("Resource Leak Summary", "17 detected • 14 resolved", "Generated yesterday"),
-            ("CI Compliance Report", "94 successful builds", "Generated 2 days ago"),
-            ("Employee Activity Report", "5 administrators", "Generated 3 days ago"),
-        ]
-
-        for title, details, date in reports:
-
-            card = ctk.CTkFrame(
-                self.content,
-                fg_color=self.colors["card"],
-                corner_radius=13,
-                border_width=1,
-                border_color=self.colors["border"]
-            )
-
-            card.pack(
-                fill="x",
-                pady=6
-            )
-
-            icon = ctk.CTkLabel(
-                card,
-                text="▤",
-                font=ctk.CTkFont(
-                    size=24,
-                    weight="bold"
-                ),
-                text_color=self.colors["primary"]
-            )
-
-            icon.pack(
-                side="left",
-                padx=20,
-                pady=18
-            )
-
-            info = ctk.CTkFrame(
-                card,
-                fg_color="transparent"
-            )
-
-            info.pack(
-                side="left",
-                fill="x",
-                expand=True,
-                pady=14
-            )
-
-            ctk.CTkLabel(
-                info,
-                text=title,
-                font=ctk.CTkFont(
-                    size=12,
-                    weight="bold"
-                ),
-                text_color=self.colors["text"]
-            ).pack(anchor="w")
-
-            ctk.CTkLabel(
-                info,
-                text=details,
-                font=ctk.CTkFont(size=10),
-                text_color=self.colors["muted"]
-            ).pack(anchor="w")
-
-            ctk.CTkLabel(
-                info,
-                text=date,
-                font=ctk.CTkFont(size=9),
-                text_color=self.colors["dim"]
-            ).pack(anchor="w")
-
-            ctk.CTkButton(
-                card,
-                text="VIEW REPORT",
-                width=110,
-                height=34,
-                corner_radius=8,
-                fg_color=self.colors["primary"],
-                hover_color=self.colors["primary_hover"],
-                font=ctk.CTkFont(
-                    size=9,
-                    weight="bold"
-                )
-            ).pack(
-                side="right",
-                padx=20
-            )
-
-    # =========================================================
-    # SETTINGS
-    # =========================================================
-
-    def show_settings(self):
-
-        self.page_header(
-            "Settings",
-            "Configure the administration console."
+        online = sum(
+            1
+            for employee in self.employee_status.values()
+            if employee.get(
+                "status"
+            ) == "ONLINE"
         )
 
-        self.settings_card(
-            "Appearance",
-            "Change the visual appearance of the administration console.",
-            self.create_appearance_setting
+        offline = sum(
+            1
+            for employee in self.employee_status.values()
+            if employee.get(
+                "status"
+            ) == "OFFLINE"
         )
 
-        self.settings_card(
-            "Security",
-            "Manage authentication and administrator security policies.",
-            self.create_security_setting
+        security = len(
+            self.security_events
         )
 
-        self.settings_card(
-            "System",
-            "Configure analyzer and dashboard behavior.",
-            self.create_system_setting
-        )
+        if hasattr(
+            self,
+            "total_employees_value"
+        ):
 
-    def settings_card(
+            self.total_employees_value.configure(
+                text=str(total)
+            )
+
+            self.online_value.configure(
+                text=str(online)
+            )
+
+            self.offline_value.configure(
+                text=str(offline)
+            )
+
+            self.security_value.configure(
+                text=str(security)
+            )
+
+    # ========================================================
+    # ACTIVITY
+    # ========================================================
+
+    def add_activity(
         self,
-        title,
-        description,
-        content_builder
+        message
     ):
 
-        card = ctk.CTkFrame(
-            self.content,
-            fg_color=self.colors["card"],
-            corner_radius=14,
-            border_width=1,
-            border_color=self.colors["border"]
+        timestamp = datetime.now().strftime(
+            "%H:%M:%S"
         )
 
-        card.pack(
-            fill="x",
-            pady=7
+        entry = (
+            f"{timestamp}  {message}"
         )
 
-        ctk.CTkLabel(
-            card,
-            text=title,
-            font=ctk.CTkFont(
-                size=15,
-                weight="bold"
-            ),
-            text_color=self.colors["text"]
-        ).pack(
-            anchor="w",
-            padx=20,
-            pady=(18, 2)
+        self.activity_events.append(
+            entry
         )
 
-        ctk.CTkLabel(
-            card,
-            text=description,
-            font=ctk.CTkFont(size=10),
-            text_color=self.colors["muted"]
-        ).pack(
-            anchor="w",
-            padx=20,
-            pady=(0, 12)
+        self.activity_events = (
+            self.activity_events[-100:]
         )
 
-        content_builder(card)
+        self.update_dashboard_activity()
+        self.update_logs_view()
+        self.update_reports()
 
-    def create_appearance_setting(self, parent):
+    # ========================================================
+    # DASHBOARD ACTIVITY VIEW
+    # ========================================================
 
-        row = ctk.CTkFrame(
-            parent,
-            fg_color="transparent"
+    def update_dashboard_activity(self):
+
+        if not hasattr(
+            self,
+            "dashboard_activity"
+        ):
+            return
+
+        self.update_textbox(
+            self.dashboard_activity,
+            "\n".join(
+                reversed(
+                    self.activity_events
+                )
+            )
         )
 
-        row.pack(
-            fill="x",
-            padx=20,
-            pady=(0, 18)
+    # ========================================================
+    # ACTIVITY LOG VIEW
+    # ========================================================
+
+    def update_logs_view(self):
+
+        if not hasattr(
+            self,
+            "logs_text"
+        ):
+            return
+
+        if not self.activity_events:
+
+            text = (
+                "No activity logs received yet."
+            )
+
+        else:
+
+            text = "\n".join(
+                reversed(
+                    self.activity_events
+                )
+            )
+
+        self.update_textbox(
+            self.logs_text,
+            text
         )
 
-        ctk.CTkLabel(
-            row,
-            text="Day / Night Mode",
-            font=ctk.CTkFont(size=11),
-            text_color=self.colors["text"]
-        ).pack(side="left")
+    # ========================================================
+    # SECURITY
+    # ========================================================
 
-        switch = ctk.CTkSwitch(
-            row,
-            text="",
-            command=self.toggle_theme
+    def add_security_event(
+        self,
+        message
+    ):
+
+        self.update_security_view()
+        self.update_reports()
+
+    # ========================================================
+    # SECURITY VIEW
+    # ========================================================
+
+    def update_security_view(self):
+
+        if not hasattr(
+            self,
+            "security_text"
+        ):
+            return
+
+        if not self.security_events:
+
+            text = (
+                "No security events received yet."
+            )
+
+        else:
+
+            text = "\n".join(
+                reversed(
+                    [
+                        (
+                            event["time"]
+                            + "  ["
+                            + event["severity"]
+                            + "] "
+                            + event["description"]
+                        )
+                        for event in self.security_events
+                    ]
+                )
+            )
+
+        self.update_textbox(
+            self.security_text,
+            text
         )
 
-        switch.pack(side="right")
+        if hasattr(
+            self,
+            "dashboard_security"
+        ):
 
-        if self.dark_mode:
-            switch.select()
+            self.update_textbox(
+                self.dashboard_security,
+                text
+            )
 
-    def create_security_setting(self, parent):
+    # ========================================================
+    # TEXTBOX HELPER
+    # ========================================================
 
-        row = ctk.CTkFrame(
-            parent,
-            fg_color="transparent"
+    def update_textbox(
+        self,
+        textbox,
+        text
+    ):
+
+        if textbox is None:
+            return
+
+        try:
+
+            textbox.configure(
+                state="normal"
+            )
+
+            textbox.delete(
+                "1.0",
+                "end"
+            )
+
+            if text:
+
+                textbox.insert(
+                    "1.0",
+                    text
+                )
+
+            else:
+
+                textbox.insert(
+                    "1.0",
+                    "No events received yet."
+                )
+
+            textbox.configure(
+                state="disabled"
+            )
+
+        except Exception as error:
+
+            print(
+                f"[ADMIN UI] Textbox update error: {error}"
+            )
+
+    # ========================================================
+    # REPORTS
+    # ========================================================
+
+    def update_reports(self):
+
+        if not hasattr(
+            self,
+            "report_total"
+        ):
+            return
+
+        total = (
+            len(self.activity_events)
+            + len(self.security_events)
         )
 
-        row.pack(
-            fill="x",
-            padx=20,
-            pady=(0, 18)
+        self.report_total.configure(
+            text=str(total)
         )
 
-        ctk.CTkLabel(
-            row,
-            text="Administrator session protection",
-            font=ctk.CTkFont(size=11),
-            text_color=self.colors["text"]
-        ).pack(side="left")
-
-        ctk.CTkSwitch(
-            row,
-            text="Enabled"
-        ).pack(side="right")
-
-    def create_system_setting(self, parent):
-
-        row = ctk.CTkFrame(
-            parent,
-            fg_color="transparent"
+        self.report_security.configure(
+            text=str(
+                len(self.security_events)
+            )
         )
 
-        row.pack(
-            fill="x",
-            padx=20,
-            pady=(0, 18)
+        self.report_activity.configure(
+            text=str(
+                len(self.activity_events)
+            )
         )
 
-        ctk.CTkLabel(
-            row,
-            text="Live system monitoring",
-            font=ctk.CTkFont(size=11),
-            text_color=self.colors["text"]
-        ).pack(side="left")
+    # ========================================================
+    # GENERATE REPORT
+    # ========================================================
 
-        ctk.CTkSwitch(
-            row,
-            text="Enabled"
-        ).pack(side="right")
+    def generate_report(self):
 
-    # =========================================================
-    # PAGE HEADER
-    # =========================================================
-
-    def page_header(self, title, description):
-
-        ctk.CTkLabel(
-            self.content,
-            text=title,
-            font=ctk.CTkFont(
-                size=30,
-                weight="bold"
-            ),
-            text_color=self.colors["text"]
-        ).pack(
-            anchor="w",
-            pady=(10, 3)
+        timestamp = datetime.now().strftime(
+            "%Y-%m-%d %H:%M:%S"
         )
 
-        ctk.CTkLabel(
-            self.content,
-            text=description,
-            font=ctk.CTkFont(
-                size=13
-            ),
-            text_color=self.colors["muted"]
-        ).pack(
-            anchor="w",
-            pady=(0, 25)
+        total = len(
+            self.employee_status
         )
 
-    # =========================================================
-    # THEME
-    # =========================================================
-
-    def toggle_theme(self):
-
-        self.dark_mode = not self.dark_mode
-
-        self.setup_theme()
-
-        for widget in self.root.winfo_children():
-            widget.destroy()
-
-        self.build_interface()
-
-        self.set_active(
-            self.current_page
+        online = sum(
+            1
+            for employee in self.employee_status.values()
+            if employee.get("status") == "ONLINE"
         )
 
-        self.page_title.configure(
-            text=self.current_page.upper()
+        offline = sum(
+            1
+            for employee in self.employee_status.values()
+            if employee.get("status") == "OFFLINE"
         )
 
-        self.update_clock()
+        report = (
+            "LEAKGUARD SECURITY REPORT\n"
+            "==========================\n\n"
+            f"Generated: {timestamp}\n"
+            f"Administrator: {self.username}\n\n"
+            f"Employees: {total}\n"
+            f"Online: {online}\n"
+            f"Offline: {offline}\n"
+            f"Activity Events: {len(self.activity_events)}\n"
+            f"Security Events: {len(self.security_events)}\n"
+        )
 
-        self.clear_content()
+        print(
+            "\n" + report
+        )
 
-        if self.current_page == "Dashboard":
-            self.show_dashboard()
+        self.add_activity(
+            "Security report generated"
+        )
 
-        elif self.current_page == "Employees":
-            self.show_employees()
-
-        elif self.current_page == "Activity Logs":
-            self.show_logs()
-
-        elif self.current_page == "Security Events":
-            self.show_security()
-
-        elif self.current_page == "Reports":
-            self.show_reports()
-
-        elif self.current_page == "Settings":
-            self.show_settings()
-
-    # =========================================================
+    # ========================================================
     # CLOCK
-    # =========================================================
+    # ========================================================
 
     def update_clock(self):
 
-        if not self.root.winfo_exists():
-            return
+        try:
 
-        now = datetime.now()
+            if not self.parent.winfo_exists():
+                return
 
-        self.clock.configure(
-            text=now.strftime(
-                "%d %b %Y   •   %I:%M:%S %p"
+            current_time = datetime.now().strftime(
+                "%d %b %Y  |  %H:%M:%S"
             )
+
+            if hasattr(
+                self,
+                "clock_label"
+            ):
+
+                self.clock_label.configure(
+                    text=current_time
+                )
+
+            self.parent.after(
+                1000,
+                self.update_clock
+            )
+
+        except Exception:
+            pass
+
+    # ========================================================
+    # CLOSE DASHBOARD
+    # ========================================================
+
+    def close_dashboard(self):
+
+        print(
+            "[ADMIN] Closing dashboard..."
         )
 
-        self.root.after(
-            1000,
-            self.update_clock
-        )
+        try:
 
-    # =========================================================
-    # LOGOUT
-    # =========================================================
+            if hasattr(
+                self,
+                "websocket_client"
+            ):
 
-    def logout(self):
+                self.websocket_client.stop()
 
-        self.root.destroy()
+        except Exception as error:
+
+            print(
+                f"[ADMIN] WebSocket shutdown error: {error}"
+            )
+
+        try:
+
+            self.parent.destroy()
+
+        except Exception:
+            pass

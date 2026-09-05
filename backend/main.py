@@ -2,7 +2,8 @@ import asyncio
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from backend.core.websocket import manager
 
 from backend.database.database import Base, engine
 from backend.database import models
@@ -60,3 +61,17 @@ def health_check():
     return {
         "status": "healthy"
     }
+
+@app.websocket("/ws/admin")
+async def admin_websocket(websocket: WebSocket):
+    await manager.connect(websocket)
+
+    try:
+        while True:
+            await websocket.receive_text()
+
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
+    except Exception:
+        manager.disconnect(websocket)
