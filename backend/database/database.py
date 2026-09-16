@@ -1,8 +1,7 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-
-DATABASE_URL = "sqlite:///./leakguard.db"
+from backend.core.config import DATABASE_URL
 
 
 engine = create_engine(
@@ -20,9 +19,12 @@ Base = declarative_base()
 
 
 def get_db():
+    """FastAPI dependency for obtaining a database session."""
     db = SessionLocal()
-
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
