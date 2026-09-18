@@ -52,6 +52,7 @@ class DashboardWindow:
         self.employee_status = {}
         self.activity_events = []
         self.security_events = []
+        self.file_activities = {}
 
         # UI containers
         self.pages = {}
@@ -174,6 +175,7 @@ class DashboardWindow:
 
         self.create_dashboard_page()
         self.create_employees_page()
+        self.create_file_activity_page()
         self.create_logs_page()
         self.create_security_page()
         self.create_reports_page()
@@ -286,6 +288,7 @@ class DashboardWindow:
         nav_items = [
             ("Dashboard", "⌂"),
             ("Employees", "◉"),
+            ("Projects / Files", "▣"),
             ("Activity Logs", "≡"),
             ("Security Events", "⚠"),
             ("Reports", "▤"),
@@ -805,10 +808,6 @@ class DashboardWindow:
             weight=1
         )
 
-        # ----------------------------------------------------
-        # HEADER
-        # ----------------------------------------------------
-
         header = ctk.CTkFrame(
             page,
             fg_color=CARD_COLOR,
@@ -838,9 +837,7 @@ class DashboardWindow:
 
         ctk.CTkLabel(
             header,
-            text=(
-                "Live status of registered LeakGuard agents."
-            ),
+            text="Live status of registered LeakGuard agents.",
             font=ctk.CTkFont(
                 size=11
             ),
@@ -850,10 +847,6 @@ class DashboardWindow:
             padx=20,
             pady=(0, 16)
         )
-
-        # ----------------------------------------------------
-        # TABLE CARD
-        # ----------------------------------------------------
 
         table = ctk.CTkFrame(
             page,
@@ -889,6 +882,330 @@ class DashboardWindow:
         )
 
         self.refresh_employee_view()
+
+    # ========================================================
+    # PROJECTS / FILES PAGE
+    # ========================================================
+
+    def create_file_activity_page(self):
+
+        page = self.create_page()
+
+        self.pages["Projects / Files"] = page
+
+        page.grid_columnconfigure(
+            0,
+            weight=1
+        )
+
+        page.grid_rowconfigure(
+            1,
+            weight=1
+        )
+
+        # ----------------------------------------------------
+        # HEADER
+        # ----------------------------------------------------
+
+        header = ctk.CTkFrame(
+            page,
+            fg_color=CARD_COLOR,
+            corner_radius=12
+        )
+
+        header.grid(
+            row=0,
+            column=0,
+            sticky="ew",
+            pady=(0, 15)
+        )
+
+        title_frame = ctk.CTkFrame(
+            header,
+            fg_color="transparent"
+        )
+
+        title_frame.pack(
+            fill="x",
+            padx=20,
+            pady=(15, 3)
+        )
+
+        ctk.CTkLabel(
+            title_frame,
+            text="Projects / Files",
+            font=ctk.CTkFont(
+                size=18,
+                weight="bold"
+            ),
+            text_color=TEXT_PRIMARY
+        ).pack(
+            side="left"
+        )
+
+        self.file_activity_count = ctk.CTkLabel(
+            title_frame,
+            text="0 ACTIVE",
+            font=ctk.CTkFont(
+                size=10,
+                weight="bold"
+            ),
+            text_color=SUCCESS
+        )
+
+        self.file_activity_count.pack(
+            side="right"
+        )
+
+        ctk.CTkLabel(
+            header,
+            text=(
+                "Live view of project files reported by employee agents."
+            ),
+            font=ctk.CTkFont(
+                size=11
+            ),
+            text_color=TEXT_SECONDARY
+        ).pack(
+            anchor="w",
+            padx=20,
+            pady=(0, 16)
+        )
+
+        # ----------------------------------------------------
+        # TABLE
+        # ----------------------------------------------------
+
+        table_card = ctk.CTkFrame(
+            page,
+            fg_color=CARD_COLOR,
+            corner_radius=12
+        )
+
+        table_card.grid(
+            row=1,
+            column=0,
+            sticky="nsew"
+        )
+
+        table_card.grid_rowconfigure(
+            0,
+            weight=1
+        )
+
+        table_card.grid_columnconfigure(
+            0,
+            weight=1
+        )
+
+        self.file_activity_table = ctk.CTkScrollableFrame(
+            table_card,
+            fg_color="transparent"
+        )
+
+        self.file_activity_table.grid(
+            row=0,
+            column=0,
+            sticky="nsew",
+            padx=10,
+            pady=10
+        )
+
+        self.refresh_file_activity_view()
+
+    # ========================================================
+    # REFRESH FILE ACTIVITY VIEW
+    # ========================================================
+
+    def refresh_file_activity_view(self):
+
+        if not hasattr(
+            self,
+            "file_activity_table"
+        ):
+            return
+
+        for widget in self.file_activity_table.winfo_children():
+            widget.destroy()
+
+        headers = [
+            "EMPLOYEE",
+            "PROJECT",
+            "FILE",
+            "ACTIVITY",
+            "MACHINE",
+            "STATUS",
+            "LAST SEEN"
+        ]
+
+        weights = [2, 2, 3, 1, 2, 1, 1]
+
+        for column, header in enumerate(headers):
+
+            self.file_activity_table.grid_columnconfigure(
+                column,
+                weight=weights[column]
+            )
+
+            ctk.CTkLabel(
+                self.file_activity_table,
+                text=header,
+                font=ctk.CTkFont(
+                    size=10,
+                    weight="bold"
+                ),
+                text_color=TEXT_MUTED
+            ).grid(
+                row=0,
+                column=column,
+                sticky="w",
+                padx=8,
+                pady=(5, 12)
+            )
+
+        if not self.file_activities:
+
+            ctk.CTkLabel(
+                self.file_activity_table,
+                text="No file activity received yet.",
+                font=ctk.CTkFont(
+                    size=12
+                ),
+                text_color=TEXT_SECONDARY
+            ).grid(
+                row=1,
+                column=0,
+                columnspan=7,
+                pady=50
+            )
+
+            self.file_activity_count.configure(
+                text="0 ACTIVE"
+            )
+
+            return
+
+        active_count = 0
+
+        sorted_activities = list(
+            self.file_activities.values()
+        )
+
+        sorted_activities.sort(
+            key=lambda item: item.get(
+                "last_seen",
+                ""
+            ),
+            reverse=True
+        )
+
+        for row, activity in enumerate(
+            sorted_activities,
+            start=1
+        ):
+
+            employee_id = activity.get(
+                "employee_id",
+                "Unknown"
+            )
+
+            employee = self.employee_status.get(
+                employee_id,
+                {}
+            )
+
+            employee_name = employee.get(
+                "display_name",
+                employee.get(
+                    "username",
+                    f"Employee {employee_id}"
+                )
+            )
+
+            project_name = activity.get(
+                "project_name",
+                activity.get(
+                    "project_key",
+                    "Unknown Project"
+                )
+            )
+
+            file_name = activity.get(
+                "relative_path",
+                activity.get(
+                    "file_name",
+                    "Unknown File"
+                )
+            )
+
+            activity_type = activity.get(
+                "activity_type",
+                "UNKNOWN"
+            )
+
+            machine_name = activity.get(
+                "machine_name",
+                "Unknown Machine"
+            )
+
+            status = activity.get(
+                "status",
+                "ACTIVE"
+            )
+
+            if status == "ACTIVE":
+                active_count += 1
+                status_color = SUCCESS
+
+            elif status == "CLOSED":
+                status_color = TEXT_MUTED
+
+            else:
+                status_color = WARNING
+
+            last_seen = self.format_last_seen(
+                activity.get(
+                    "last_seen"
+                )
+            )
+
+            values = [
+                employee_name,
+                project_name,
+                file_name,
+                activity_type,
+                machine_name,
+                status,
+                last_seen
+            ]
+
+            for column, value in enumerate(values):
+
+                text_color = TEXT_SECONDARY
+
+                if column == 5:
+                    text_color = status_color
+
+                ctk.CTkLabel(
+                    self.file_activity_table,
+                    text=str(value),
+                    font=ctk.CTkFont(
+                        size=11,
+                        weight="bold" if column == 5 else "normal"
+                    ),
+                    text_color=text_color,
+                    anchor="w"
+                ).grid(
+                    row=row,
+                    column=column,
+                    sticky="w",
+                    padx=8,
+                    pady=9
+                )
+
+        self.file_activity_count.configure(
+            text=f"{active_count} ACTIVE"
+        )
 
     # ========================================================
     # ACTIVITY LOG PAGE
@@ -1323,7 +1640,6 @@ class DashboardWindow:
         # Hide all pages
 
         for page in self.pages.values():
-
             page.grid_remove()
 
         # Show selected page
@@ -1365,15 +1681,23 @@ class DashboardWindow:
         # Page refresh
 
         if page_name == "Employees":
+
             self.refresh_employee_view()
 
+        elif page_name == "Projects / Files":
+
+            self.refresh_file_activity_view()
+
         elif page_name == "Activity Logs":
+
             self.update_logs_view()
 
         elif page_name == "Security Events":
+
             self.update_security_view()
 
         elif page_name == "Reports":
+
             self.update_reports()
 
     # ========================================================
@@ -1461,6 +1785,7 @@ class DashboardWindow:
 
             self.refresh_employee_view()
             self.update_dashboard_statistics()
+            self.refresh_file_activity_view()
 
             self.system_status.configure(
                 text="Backend Connected"
@@ -1668,6 +1993,30 @@ class DashboardWindow:
                     self.handle_activity_event(d)
                 )
 
+            # ------------------------------------------------
+            # FILE ACTIVITY
+            # ------------------------------------------------
+
+            elif event_type == "FILE_ACTIVITY":
+
+                self.parent.after(
+                    0,
+                    lambda d=data:
+                    self.handle_file_activity(d)
+                )
+
+            # ------------------------------------------------
+            # FILE ACTIVITY CLOSED
+            # ------------------------------------------------
+
+            elif event_type == "FILE_ACTIVITY_CLOSED":
+
+                self.parent.after(
+                    0,
+                    lambda d=data:
+                    self.handle_file_activity_closed(d)
+                )
+
         except json.JSONDecodeError:
 
             print(
@@ -1754,6 +2103,7 @@ class DashboardWindow:
 
         self.refresh_employee_view()
         self.update_dashboard_statistics()
+        self.refresh_file_activity_view()
 
     # ========================================================
     # SECURITY EVENT
@@ -1818,6 +2168,193 @@ class DashboardWindow:
         )
 
     # ========================================================
+    # FILE ACTIVITY EVENT
+    # ========================================================
+
+    def handle_file_activity(
+        self,
+        data
+    ):
+
+        activity_id = data.get(
+            "id"
+        )
+
+        if activity_id is None:
+
+            employee_id = data.get(
+                "employee_id",
+                "unknown"
+            )
+
+            project_key = data.get(
+                "project_key",
+                data.get(
+                    "project_name",
+                    "unknown"
+                )
+            )
+
+            relative_path = data.get(
+                "relative_path",
+                data.get(
+                    "file_path",
+                    "unknown"
+                )
+            )
+
+            activity_id = (
+                f"{employee_id}:"
+                f"{project_key}:"
+                f"{relative_path}"
+            )
+
+        self.file_activities[
+            str(activity_id)
+        ] = {
+
+            "employee_id": data.get(
+                "employee_id",
+                "Unknown"
+            ),
+
+            "project_id": data.get(
+                "project_id"
+            ),
+
+            "project_key": data.get(
+                "project_key",
+                ""
+            ),
+
+            "project_name": data.get(
+                "project_name",
+                data.get(
+                    "project_key",
+                    "Unknown Project"
+                )
+            ),
+
+            "file_name": data.get(
+                "file_name",
+                "Unknown File"
+            ),
+
+            "file_path": data.get(
+                "file_path",
+                ""
+            ),
+
+            "relative_path": data.get(
+                "relative_path",
+                data.get(
+                    "file_path",
+                    ""
+                )
+            ),
+
+            "activity_type": data.get(
+                "activity_type",
+                "UNKNOWN"
+            ),
+
+            "status": data.get(
+                "status",
+                "ACTIVE"
+            ),
+
+            "machine_name": data.get(
+                "machine_name",
+                "Unknown Machine"
+            ),
+
+            "last_seen": data.get(
+                "last_seen",
+                datetime.now().isoformat()
+            )
+        }
+
+        self.add_activity(
+            (
+                f"{data.get('machine_name', 'Unknown Machine')} "
+                f"is working on "
+                f"{data.get('project_name', 'Unknown Project')} / "
+                f"{data.get('relative_path', data.get('file_name', 'Unknown File'))}"
+            )
+        )
+
+        self.refresh_file_activity_view()
+
+    # ========================================================
+    # FILE ACTIVITY CLOSED
+    # ========================================================
+
+    def handle_file_activity_closed(
+        self,
+        data
+    ):
+
+        activity_id = data.get(
+            "id"
+        )
+
+        if activity_id is None:
+
+            employee_id = data.get(
+                "employee_id",
+                "unknown"
+            )
+
+            project_key = data.get(
+                "project_key",
+                data.get(
+                    "project_name",
+                    "unknown"
+                )
+            )
+
+            relative_path = data.get(
+                "relative_path",
+                data.get(
+                    "file_path",
+                    "unknown"
+                )
+            )
+
+            activity_id = (
+                f"{employee_id}:"
+                f"{project_key}:"
+                f"{relative_path}"
+            )
+
+        activity_id = str(
+            activity_id
+        )
+
+        if activity_id in self.file_activities:
+
+            self.file_activities[
+                activity_id
+            ]["status"] = "CLOSED"
+
+            self.file_activities[
+                activity_id
+            ]["ended_at"] = data.get(
+                "ended_at",
+                datetime.now().isoformat()
+            )
+
+        self.add_activity(
+            (
+                f"{data.get('machine_name', 'Unknown Machine')} "
+                f"stopped working on "
+                f"{data.get('relative_path', data.get('file_name', 'Unknown File'))}"
+            )
+        )
+
+        self.refresh_file_activity_view()
+
+    # ========================================================
     # EMPLOYEE TABLE
     # ========================================================
 
@@ -1832,10 +2369,6 @@ class DashboardWindow:
         for widget in self.employee_table.winfo_children():
 
             widget.destroy()
-
-        # ----------------------------------------------------
-        # HEADERS
-        # ----------------------------------------------------
 
         headers = [
             "EMPLOYEE",
@@ -1864,10 +2397,6 @@ class DashboardWindow:
                 pady=(5, 12)
             )
 
-        # ----------------------------------------------------
-        # NO EMPLOYEES
-        # ----------------------------------------------------
-
         if not self.employee_status:
 
             ctk.CTkLabel(
@@ -1885,10 +2414,6 @@ class DashboardWindow:
             )
 
             return
-
-        # ----------------------------------------------------
-        # EMPLOYEE ROWS
-        # ----------------------------------------------------
 
         for row, employee in enumerate(
             self.employee_status.values(),
@@ -1927,8 +2452,6 @@ class DashboardWindow:
                 "last_seen",
                 "-"
             )
-
-            # Status color
 
             if status == "ONLINE":
 
@@ -2290,6 +2813,7 @@ class DashboardWindow:
             f"Offline: {offline}\n"
             f"Activity Events: {len(self.activity_events)}\n"
             f"Security Events: {len(self.security_events)}\n"
+            f"Tracked File Activities: {len(self.file_activities)}\n"
         )
 
         print(
